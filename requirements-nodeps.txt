@@ -1,0 +1,6 @@
+# Install with:  pip install --no-deps -r requirements-nodeps.txt
+# grad-cam declares opencv-python-headless as a dependency, which would clash
+# with opencv-python (see requirements.txt). It works fine with the full build,
+# so it is installed without its dependencies; those are listed in requirements.txt.
+# `pip check` will therefore report "grad-cam requires opencv-python-headless" - expected.
+grad-cam==1.5.7         # Stage 4 EigenCAM heatmaps

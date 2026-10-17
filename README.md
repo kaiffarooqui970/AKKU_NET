@@ -15,9 +15,17 @@ floor, **before** they reach the bunker or compactor and start fires.
 python3.11 -m venv ~/.venvs/akkunet
 source ~/.venvs/akkunet/bin/activate
 pip install -r requirements.txt
+pip install --no-deps -r requirements-nodeps.txt   # grad-cam, see below
 pip install -e .          # makes `import akkunet` work from scripts/ and tests/
 pytest                    # all tests use synthetic data only
+python scripts/check_opencv_gui.py                 # should open a small test window
 ```
+
+**Why two requirements files:** `opencv-python` (with GUI, needed for live
+demo windows) and `opencv-python-headless` (no GUI) both install into the same
+`cv2/` folder and break each other. grad-cam asks for the headless one, so it is
+installed with `--no-deps`. `pip check` will then say *"grad-cam requires
+opencv-python-headless"*. That is expected and harmless.
 
 All settings live in `config.yaml`. Paths in it are relative to the config file.
 

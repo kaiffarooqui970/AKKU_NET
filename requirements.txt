@@ -1,9 +1,21 @@
-# Python 3.11. Install with:  pip install -r requirements.txt && pip install -e .
+# Python 3.11. Install with:
+#   pip install -r requirements.txt
+#   pip install --no-deps -r requirements-nodeps.txt
+#   pip install -e .
 ultralytics>=8.3        # YOLO11 detection + ByteTrack (pulls in torch, torchvision)
-opencv-python>=4.9      # video reading, image processing
+# Full OpenCV build: needed for cv2.imshow windows on macOS (Stage 5 live demo).
+# Pinned, and opencv-python-headless must NOT be installed alongside it: both
+# write into the same cv2/ folder and break each other. See scripts/check_opencv_gui.py.
+opencv-python==5.0.0.93
 numpy>=1.26
 pyyaml>=6.0
 pandas>=2.0
 streamlit>=1.35         # Stage 6 dashboard
-grad-cam>=1.5           # Stage 4 EigenCAM heatmaps
 pytest>=8.0
+# grad-cam's own dependencies (grad-cam itself is in requirements-nodeps.txt)
+matplotlib
+pillow
+scikit-learn
+scipy
+tqdm
+ttach
