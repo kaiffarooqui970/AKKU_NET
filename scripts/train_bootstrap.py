@@ -6,6 +6,8 @@ Usage:
     python scripts/train_bootstrap.py bootstrap_v1                  # train + per-class report
     python scripts/train_bootstrap.py bootstrap_v1 --resume         # continue from weights/last.pt
     python scripts/train_bootstrap.py bootstrap_v1 --report-only    # per-class report from best.pt
+    python scripts/train_bootstrap.py bootstrap_v2 --init runs/bootstrap/bootstrap_v1/weights/best.pt --negatives
+                                       # fine-tune, with own hard negatives (empty labels) added to TRAIN only
 
 Run scripts/build_bootstrap.py first. Train / val = the group split it made
 (val = bootstrap_val).
@@ -35,14 +37,28 @@ def main() -> int:
     group.add_argument("--benchmark", action="store_true")
     group.add_argument("--resume", action="store_true", help="continue an interrupted run from last.pt")
     group.add_argument("--report-only", action="store_true", help="skip training, evaluate best.pt")
+    parser.add_argument("--init", help="start from these weights instead of bootstrap.model (fine-tuning)")
+    parser.add_argument("--negatives", action="store_true",
+                        help="add data/negatives/ frames (empty labels) to the TRAIN list only")
+    parser.add_argument("--epochs", type=int, help="override bootstrap.epochs (e.g. shorter fine-tune)")
     parser.add_argument("--config", default=REPO_ROOT / "config.yaml")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
-    bs, classes = cfg["bootstrap"], cfg["classes"]
+    bs, classes = dict(cfg["bootstrap"]), cfg["classes"]
+    if args.init:
+        bs["model"] = args.init
+    if args.epochs:
+        bs["epochs"] = args.epochs
     try:
+        extra = []
+        if args.negatives:
+            from akkunet.negatives import negative_train_images
+            extra = negative_train_images(cfg["paths"]["negatives"])
+            print(f"Adding {len(extra)} hard-negative frames (empty labels) to TRAIN only.")
         data_yaml = write_run_dataset(cfg["paths"]["bootstrap"], args.run, classes,
-                                      train_sources=bs["datasets"], val_sources=bs["datasets"])
+                                      train_sources=bs["datasets"], val_sources=bs["datasets"],
+                                      extra_train_images=extra)
     except (ValueError, FileNotFoundError) as e:
         print(f"Cannot build the dataset: {e}")
         return 1
@@ -102,7 +118,8 @@ def main() -> int:
           f"Public data only: {bs['datasets']}. Train {n_train} images, bootstrap_val {n_val} images "
           f"(split by near-copy group, see reports/bootstrap_dataset.md; val is still the same kind of "
           f"internet photos as train). "
-          f"Model {bs['model']}, imgsz {bs['imgsz']}, device {device}. Weights: `{best.relative_to(REPO_ROOT)}`\n\n"
+          + (f"Plus {len(extra)} own hard-negative frames (empty labels) in train only. " if extra else "")
+          + f"Model {bs['model']}, imgsz {bs['imgsz']}, device {device}. Weights: `{best.relative_to(REPO_ROOT)}`\n\n"
           f"{per_class_table(metrics, classes, val_counts)}\n\n{BOOTSTRAP_BANNER}\n")
     out = cfg["paths"]["reports"] / f"bootstrap_{args.run}_metrics.md"
     out.write_text(md)

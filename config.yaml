@@ -11,6 +11,8 @@ paths:
   external: data/external          # public dataset exports, as downloaded (one folder per dataset)
   class_maps: configs/class_maps   # <dataset>.yaml: source class -> our class / null (drop)
   bootstrap: data/bootstrap        # imported public data for the bootstrap model ONLY
+  raw_negatives: data/raw_negatives   # own "no battery" recordings (faces, hands, lookalikes): git-ignored
+  negatives: data/negatives          # frames + EMPTY labels from them, TRAIN ONLY
   env_file: .env                   # local secrets (Telegram token, chat IDs); NEVER committed
   escalation_db: data/escalation/events.sqlite
   escalation_snapshots: data/escalation/snapshots      # may show people: git-ignored

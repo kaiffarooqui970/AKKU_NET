@@ -12,11 +12,13 @@ BOOTSTRAP_BANNER = "**BOOTSTRAP ONLY — not tipping-floor performance.**"
 
 
 def write_run_dataset(bootstrap_dir: Path, run: str, classes: list[str],
-                      train_sources: list[str], val_sources: list[str]) -> Path:
+                      train_sources: list[str], val_sources: list[str],
+                      extra_train_images: list[str] | None = None) -> Path:
     """Write image lists + an Ultralytics yaml for one run, filtered by manifest source.
 
     Using lists (not folders) lets two runs share data/bootstrap/ but train on
     different datasets while validating on exactly the same bootstrap_val.
+    `extra_train_images` (e.g. hard negatives) are appended to TRAIN only.
     """
     with open(bootstrap_dir / "manifest.csv", newline="") as f:
         rows = list(csv.DictReader(f))
@@ -32,12 +34,15 @@ def write_run_dataset(bootstrap_dir: Path, run: str, classes: list[str],
         paths = [str(bootstrap_dir / r["image"]) for r in rows if r["split"] == split and r["source"] in sources]
         if not paths:
             raise ValueError(f"No {split} images from {sources}")
+        if split == "train":
+            paths += extra_train_images or []
         files[split] = lists / f"{run}_{split}.txt"
         files[split].write_text("\n".join(paths) + "\n")
 
     data = {"train": str(files["train"]), "val": str(files["val"]), "names": dict(enumerate(classes))}
     out = bootstrap_dir / f"{run}.yaml"
-    out.write_text(f"# BOOTSTRAP ONLY. train: {train_sources}  val: {val_sources}\n"
+    extra = f" + {len(extra_train_images)} extra train images" if extra_train_images else ""
+    out.write_text(f"# BOOTSTRAP ONLY. train: {train_sources}{extra}  val: {val_sources}\n"
                    + yaml.safe_dump(data, sort_keys=False))
     return out
 
