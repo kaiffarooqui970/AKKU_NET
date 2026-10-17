@@ -4,6 +4,8 @@ Usage:
     python scripts/train_bootstrap.py bootstrap_v1 --dry-run        # print command, write lists
     python scripts/train_bootstrap.py bootstrap_v1 --benchmark      # time 10% of one epoch -> estimate
     python scripts/train_bootstrap.py bootstrap_v1                  # train + per-class report
+    python scripts/train_bootstrap.py bootstrap_v1 --resume         # continue from weights/last.pt
+    python scripts/train_bootstrap.py bootstrap_v1 --report-only    # per-class report from best.pt
 
 Run scripts/build_bootstrap.py first. Train / val = the group split it made
 (val = bootstrap_val).
@@ -31,6 +33,8 @@ def main() -> int:
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--dry-run", action="store_true")
     group.add_argument("--benchmark", action="store_true")
+    group.add_argument("--resume", action="store_true", help="continue an interrupted run from last.pt")
+    group.add_argument("--report-only", action="store_true", help="skip training, evaluate best.pt")
     parser.add_argument("--config", default=REPO_ROOT / "config.yaml")
     args = parser.parse_args()
 
@@ -78,11 +82,21 @@ def main() -> int:
               f"~{per_epoch * 40 / 3600:.1f} h.")
         return 0
 
-    model = YOLO(bs["model"])
-    model.train(**train_args)
-    best = REPO_ROOT / "runs" / "bootstrap" / args.run / "weights" / "best.pt"
+    run_dir = REPO_ROOT / "runs" / "bootstrap" / args.run
+    if args.resume:
+        # Ultralytics restores every setting (epochs, optimizer state, ...) from last.pt.
+        YOLO(str(run_dir / "weights" / "last.pt")).train(resume=True)
+    elif not args.report_only:
+        # The folder may already exist because the shell log (train.log) is written
+        # into it. Reuse it only while it holds no weights, so a finished run is
+        # never overwritten (and Ultralytics doesn't silently switch to <run>2).
+        if (run_dir / "weights").exists():
+            print(f"{run_dir} already has weights. Use --resume, --report-only or a new run name.")
+            return 1
+        YOLO(bs["model"]).train(**train_args, exist_ok=True)
+    best = run_dir / "weights" / "best.pt"
     metrics = YOLO(str(best)).val(data=str(data_yaml), imgsz=bs["imgsz"], device=device,
-                                  project=str(REPO_ROOT / "runs" / "bootstrap"), name=f"{args.run}_val")
+                                  project=str(REPO_ROOT / "runs" / "bootstrap"), name=f"{args.run}_val", exist_ok=True)
     val_counts = count_boxes(data_yaml.parent / "lists" / f"{args.run}_val.txt", classes)
     md = (f"# Bootstrap metrics: {args.run}\n\n{BOOTSTRAP_BANNER}\n\n"
           f"Public data only: {bs['datasets']}. Train {n_train} images, bootstrap_val {n_val} images "

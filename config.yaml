@@ -66,3 +66,19 @@ bootstrap:
   seed: 0
   val_fraction: 0.15       # share of every class's images in bootstrap_val
   near_copy_hamming: 10    # dHash bits (of 256) within which two images count as copies
+
+# ---------------------------------------------------------------- Live demo (Part B3)
+demo:
+  # Relative to this config file. Override with --weights.
+  weights: runs/bootstrap/bootstrap_v1/weights/best.pt
+  source: 0                # webcam index (0 = built-in camera) or a video file path
+  imgsz: 640
+  detect_conf: 0.25        # boxes below this are not drawn or tracked
+  tracker: bytetrack.yaml  # Ultralytics' built-in ByteTrack settings
+  # Alert rule: a track raises ONE alert once it has been seen in at least
+  # alert_min_frames frames with confidence >= alert_conf. A single
+  # high-confidence flicker therefore never alerts.
+  alert_conf: 0.5
+  alert_min_frames: 5
+  alert_classes: []        # empty = every class of the model
+  banner_seconds: 3.0      # how long the red banner stays after an alert

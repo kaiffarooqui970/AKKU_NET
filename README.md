@@ -5,7 +5,7 @@ battery packs, tool batteries, loose cells) in household waste on the tipping
 floor, **before** they reach the bunker or compactor and start fires.
 
 > Status: Stage 0 (setup) and Stage 1 (frame extraction) are done. Part B2:
-> the bootstrap dataset is built from public data; training is next. Later stages (labelling own footage, robustness, live demo,
+> bootstrap model trained on public data; Part B3: live webcam demo. Later stages (labelling own footage, robustness, live demo,
 > dashboard) are not built yet.
 > Thermal detection is planned for phase 2 (needs real thermal hardware).
 
@@ -129,6 +129,26 @@ are pooled, near-copies (same source name, or mirrored, rotated or greyscale
 duplicates) are grouped, and whole groups are split about 85% train / 15%
 bootstrap_val per class. See `reports/bootstrap_dataset.md` and
 `reports/finding_vape_cloud_labels.md`.
+
+Training runs for hours. Start it in the background so the Mac doesn't sleep:
+
+```bash
+mkdir -p runs/bootstrap/bootstrap_v1
+nohup caffeinate -i python scripts/train_bootstrap.py bootstrap_v1 > runs/bootstrap/bootstrap_v1/train.log 2>&1 &
+python scripts/train_bootstrap.py bootstrap_v1 --resume     # if it stopped: continue from weights/last.pt
+```
+
+### Live demo (Part B3)
+```bash
+python -m akkunet.app                                # webcam 0, weights from config demo.weights
+python -m akkunet.app --source clip.mp4 --record out/annotated.mp4
+python -m akkunet.app --weights yolo11n.pt --alert-classes person   # check with a stock COCO model
+```
+Each box shows `#track class confidence`. A track raises **one** alert (red box,
+red banner "Possible battery detected", console line) after it has been seen
+in `demo.alert_min_frames` frames with confidence ≥ `demo.alert_conf`. Press q
+or Esc to quit. On macOS the terminal needs camera permission (System Settings ›
+Privacy & Security › Camera).
 
 ### Smoke test (pipeline check only)
 ```bash
