@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 import pytest
 
-from akkuwatch.frames import (
+from akkunet.frames import (
     assign_splits,
     dhash,
     extract_session,
@@ -11,7 +11,7 @@ from akkuwatch.frames import (
     hamming,
     laplacian_variance,
 )
-from akkuwatch.synthetic import make_synthetic_video
+from akkunet.synthetic import make_synthetic_video
 
 FE_CFG = {
     "every_n_frames": 1,

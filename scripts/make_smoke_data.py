@@ -13,7 +13,7 @@ from pathlib import Path
 
 import yaml
 
-from akkuwatch.synthetic import make_synthetic_video
+from akkunet.synthetic import make_synthetic_video
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SMOKE_DIR = REPO_ROOT / "data" / "smoke_test"

@@ -17,8 +17,8 @@ import shutil
 import sys
 from pathlib import Path
 
-from akkuwatch.config import load_config
-from akkuwatch.frames import assign_splits, extract_session, find_sessions, summary_table
+from akkunet.config import load_config
+from akkunet.frames import assign_splits, extract_session, find_sessions, summary_table
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 

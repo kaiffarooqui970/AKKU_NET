@@ -15,7 +15,7 @@ floor, **before** they reach the bunker or compactor and start fires.
 python3.11 -m venv ~/.venvs/akkunet
 source ~/.venvs/akkunet/bin/activate
 pip install -r requirements.txt
-pip install -e .          # makes `import akkuwatch` work from scripts/ and tests/
+pip install -e .          # makes `import akkunet` work from scripts/ and tests/
 pytest                    # all tests use synthetic data only
 ```
 
@@ -28,7 +28,7 @@ config.yaml            every setting (paths, classes, thresholds, splits)
 data/raw_videos/       your recordings, one subfolder per session (git-ignored)
 data/dataset/          extracted frames + manifest.csv (git-ignored)
 data/smoke_test/       synthetic smoke-test data, NOT FOR EVALUATION (git-ignored)
-src/akkuwatch/         the Python package (config, device, frames, ...)
+src/akkunet/           the Python package (config, device, frames, ...)
 scripts/               command-line entry points
 notebooks/             Colab training notebook (Stage 3)
 tests/                 pytest

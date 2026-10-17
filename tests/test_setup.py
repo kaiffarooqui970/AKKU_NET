@@ -1,8 +1,8 @@
 """Tests for Stage 0: config loading and device selection."""
 from pathlib import Path
 
-from akkuwatch.config import load_config
-from akkuwatch.device import get_device
+from akkunet.config import load_config
+from akkunet.device import get_device
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
