@@ -3,6 +3,9 @@ data/*
 !data/raw_videos/
 data/raw_videos/*
 !data/raw_videos/.gitkeep
+!data/raw_photos/
+data/raw_photos/*
+!data/raw_photos/.gitkeep
 
 # Model weights and Ultralytics run folders
 *.pt

@@ -1,0 +1,10 @@
+# battery (Roboflow Universe, gvl610). CC BY 4.0 as declared by the uploader.
+# Only used for the optional white-sheet experiment in Part B2 step 6.
+# Alkaline and 9V cells count as loose_cell (docs/labelling_guide.md).
+dataset: gvl610_battery
+mapping:
+  # Generic "battery": unclear what it contains; decide after a contact sheet.
+  battery: PENDING
+  9V: loose_cell
+  coincell: loose_cell
+  drycell: loose_cell

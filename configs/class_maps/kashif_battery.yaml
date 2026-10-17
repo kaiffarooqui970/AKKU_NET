@@ -1,0 +1,11 @@
+# Battery Detection (Roboflow Universe, Kashif). CC BY 4.0 as declared by the uploader.
+# Keys must match data.yaml exactly (check with scripts/inspect_export.py).
+# Car and bike (starter/lead-acid) batteries are out of scope -> null. Images
+# whose boxes are ALL dropped are skipped, not kept as background.
+dataset: kashif_battery
+mapping:
+  Laptop Battery: battery_pack
+  Smartphone Battery: battery_pack
+  Dry Cell: loose_cell
+  Car Battery: null
+  Bike Battery: null

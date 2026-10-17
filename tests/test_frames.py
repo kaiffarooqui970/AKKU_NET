@@ -14,7 +14,9 @@ from akkunet.frames import (
     OWN_SOURCE,
     assign_splits,
     dhash,
+    extract_photo_session,
     extract_session,
+    find_photo_sessions,
     find_sessions,
     hamming,
     laplacian_variance,
@@ -177,3 +179,33 @@ def test_extract_frames_script_writes_source_column(tmp_path):
         rows = list(reader)
     assert reader.fieldnames == MANIFEST_FIELDS
     assert len(rows) == 4 and {r["source"] for r in rows} == {"own"}
+
+
+# ---------------------------------------------------------------- train-only photos
+
+def test_train_only_session_cannot_be_evaluation_split():
+    with pytest.raises(ValueError, match="train-only"):
+        assign_splits(["s1", "train_only_2026-10-20"], {"shift_test_sessions": ["train_only_2026-10-20"]})
+
+
+def test_photo_folders_must_follow_train_only_naming(tmp_path):
+    (tmp_path / "powerbanks").mkdir()
+    with pytest.raises(ValueError, match="train_only_"):
+        find_photo_sessions(tmp_path, [".jpg"])
+
+
+def test_photos_always_go_to_train(tmp_path):
+    folder = tmp_path / "raw_photos" / "train_only_2026-10-20_powerbanks"
+    folder.mkdir(parents=True)
+    for i in range(3):
+        cv2.imwrite(str(folder / f"IMG_{i}.jpg"), random_blocks(i))
+    cv2.imwrite(str(folder / "IMG_dup.jpg"), random_blocks(0))
+    cv2.imwrite(str(folder / "IMG_blur.jpg"), cv2.GaussianBlur(random_blocks(5), (51, 51), 0))
+
+    sessions = find_photo_sessions(tmp_path / "raw_photos", [".jpg"])
+    stats, rows = extract_photo_session("train_only_2026-10-20_powerbanks",
+                                        sessions["train_only_2026-10-20_powerbanks"], tmp_path / "images", FE_CFG)
+    assert (stats.kept, stats.duplicates, stats.blurry) == (3, 1, 1)
+    assert {r["split"] for r in rows} == {"train"} and {r["source"] for r in rows} == {"own"}
+    assert len(list((tmp_path / "images" / "train").glob("*.jpg"))) == 3
+    assert not (tmp_path / "images" / "val").exists()

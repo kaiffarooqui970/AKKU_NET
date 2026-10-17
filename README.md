@@ -4,8 +4,10 @@ A computer-vision demo that spots lithium-battery items (vapes, power banks,
 battery packs, tool batteries, loose cells) in household waste on the tipping
 floor, **before** they reach the bunker or compactor and start fires.
 
-> Status: Stage 0 (setup) and Stage 1 (frame extraction) are done. Later stages
-> (labelling, training, robustness, live demo, dashboard) are not built yet.
+> Status: Stage 0 (setup) and Stage 1 (frame extraction) are done. Part B2
+> (bootstrap model on public data) tooling is built; the datasets still need
+> downloading. Later stages (labelling own footage, robustness, live demo,
+> dashboard) are not built yet.
 > Thermal detection is planned for phase 2 (needs real thermal hardware).
 
 ## Licence note: Ultralytics YOLO is AGPL-3.0
@@ -43,14 +45,18 @@ All settings live in `config.yaml`. Paths in it are relative to the config file.
 ```
 config.yaml            every setting (paths, classes, thresholds, splits)
 data/raw_videos/       your recordings, one subfolder per session (git-ignored)
+data/raw_photos/       own photos for TRAINING ONLY: train_only_<YYYY-MM-DD>[_note]/ (git-ignored)
 data/dataset/          extracted frames + manifest.csv (git-ignored)
+data/external/         public dataset exports as downloaded (git-ignored), see SOURCES.md
+data/bootstrap/        public data imported for the bootstrap model only (git-ignored)
+configs/class_maps/    per public dataset: source class -> our class / null (drop)
 data/smoke_test/       synthetic smoke-test data, NOT FOR EVALUATION (git-ignored)
 src/akkunet/           the Python package (config, device, frames, ...)
 scripts/               command-line entry points
 notebooks/             Colab training notebook (Stage 3)
 tests/                 pytest
 reports/               generated markdown reports
-docs/                  guides (labelling guide in Stage 2)
+docs/                  guides (docs/labelling_guide.md: classes and labelling decisions)
 ```
 
 ## Run order so far
@@ -94,6 +100,31 @@ already exist, because re-extracting could orphan them.
 **Tuning:** check the "median blur score" column and look at a few removed
 frames. If good frames get dropped, lower `blur_threshold`. If too many
 similar frames survive, raise `hamming_threshold`.
+
+**Own photos (train only):** to give power_bank / tool_battery some training
+data, put JPEG photos in `data/raw_photos/train_only_<YYYY-MM-DD>[_note]/`
+(e.g. `train_only_2026-10-20_powerbanks`). They get the same blur and duplicate
+filters and always land in train. Badly named folders, or listing one under
+val/test/shift_test, stop the script. Don't reuse these objects/backgrounds in
+test recordings.
+
+### Bootstrap model on public data (Part B2)
+A first model for the webcam demo, trained only on public Roboflow data. Its
+scores say nothing about the tipping floor. Download each dataset as a YOLOv8
+export into `data/external/<name>/` (names in `SOURCES.md`), then:
+
+```bash
+python scripts/inspect_export.py battery_and_vape           # splits, sizes, augmentation, leaks
+python scripts/box_contact_sheet.py battery_and_vape battery  # what does a class really contain?
+python scripts/import_external.py kashif_battery            # refuses while a class is unmapped/PENDING
+python scripts/check_vape_person.py battery_and_vape vape   # face-shortcut check
+python scripts/train_bootstrap.py bootstrap_v1 --dry-run    # print the command
+python scripts/train_bootstrap.py bootstrap_v1 --benchmark  # estimate run time
+python scripts/train_bootstrap.py bootstrap_v1              # train + per-class report
+```
+
+Validation is always the exports' `valid` splits of `bootstrap.datasets`
+(bootstrap_val), also when extra train data is added (`--extra`).
 
 ### Smoke test (pipeline check only)
 ```bash

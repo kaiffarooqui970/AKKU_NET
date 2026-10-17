@@ -1,5 +1,6 @@
 """Stage 1: extract frames from data/raw_videos/<session>/*.mp4 into a
-session-split dataset.
+session-split dataset, plus own train-only photos from
+data/raw_photos/train_only_<YYYY-MM-DD>[_note]/*.jpg (always split = train).
 
 Usage:
     python scripts/extract_frames.py                    # uses config.yaml
@@ -18,7 +19,8 @@ import sys
 from pathlib import Path
 
 from akkunet.config import load_config
-from akkunet.frames import MANIFEST_FIELDS, assign_splits, extract_session, find_sessions, summary_table
+from akkunet.frames import (MANIFEST_FIELDS, assign_splits, extract_photo_session, extract_session,
+                            find_photo_sessions, find_sessions, summary_table)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -41,6 +43,16 @@ def main() -> int:
     sessions = find_sessions(raw_dir, fe["video_extensions"])
     if not sessions:
         print(f"No videos found. Put them in {raw_dir}/<session_name>/")
+        return 1
+    try:
+        photo_sessions = find_photo_sessions(cfg["paths"].get("raw_photos", raw_dir / "_none"),
+                                             fe.get("photo_extensions", []))
+    except ValueError as e:
+        print(f"Photo folder error: {e}")
+        return 1
+    clash = set(photo_sessions) & set(sessions)
+    if clash:
+        print(f"Session names used for both videos and photos: {sorted(clash)}")
         return 1
 
     # Splits are checked BEFORE any file is written, so a config mistake
@@ -69,6 +81,11 @@ def main() -> int:
         split = assignment[session]
         print(f"[{split:>10}] {session}: {len(videos)} video(s) ...", flush=True)
         stats, rows = extract_session(session, split, videos, images_root, fe)
+        all_stats.append(stats)
+        manifest += rows
+    for session, photos in photo_sessions.items():
+        print(f"[{'train':>10}] {session}: {len(photos)} photo(s), train only ...", flush=True)
+        stats, rows = extract_photo_session(session, photos, images_root, fe)
         all_stats.append(stats)
         manifest += rows
 

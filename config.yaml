@@ -5,8 +5,12 @@ project_name: AkkuNet
 
 paths:
   raw_videos: data/raw_videos      # one subfolder per recording session
+  raw_photos: data/raw_photos      # own photos for TRAINING ONLY: train_only_<YYYY-MM-DD>[_note]/
   dataset: data/dataset            # extracted frames: images/<split>/..., later labels/<split>/...
   reports: reports
+  external: data/external          # public dataset exports, as downloaded (one folder per dataset)
+  class_maps: configs/class_maps   # <dataset>.yaml: source class -> our class / null (drop)
+  bootstrap: data/bootstrap        # imported public data for the bootstrap model ONLY
 
 # Class order matters: the index in this list is the YOLO class ID.
 classes:
@@ -23,6 +27,7 @@ device: auto
 frame_extraction:
   every_n_frames: 15              # at 30 fps this is 2 frames per second
   video_extensions: [.mp4, .mov, .m4v, .avi, .mkv]
+  photo_extensions: [.jpg, .jpeg, .png]   # iPhone: export as JPEG ("Most Compatible"), not HEIC
   jpeg_quality: 95
   # Blur filter: variance of the Laplacian, measured on a copy resized so its
   # long side is blur_measure_long_side px (so the threshold does not depend on
@@ -44,3 +49,18 @@ splits:
   # At least one session filmed on a background / lighting NOT used in any
   # other split. Used to measure how much performance drops under shift.
   shift_test_sessions: []
+
+# ---------------------------------------------------------------- Bootstrap (Part B2)
+# A first model trained ONLY on public data, to have something for the webcam
+# demo before own footage is labelled. Its scores say nothing about the
+# tipping floor. Validation = the exports' own "valid" splits (bootstrap_val).
+bootstrap:
+  datasets: [battery_and_vape, kashif_battery]
+  model: yolo11n.pt        # nano, COCO-pretrained
+  imgsz: 640
+  epochs: 60
+  batch: 16
+  patience: 15             # stop early if val mAP has not improved for this many epochs
+  seed: 0
+  # Optional experiment: add at most this many gvl610 (top-down, white sheet) images.
+  gvl610_max_train_images: 1500

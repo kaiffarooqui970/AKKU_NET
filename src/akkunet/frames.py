@@ -9,7 +9,13 @@ Pipeline per session:
 Splits are assigned per SESSION. Frames from one video are nearly identical,
 so putting some in train and some in test would let the model "recognise"
 the test images instead of generalising (data leakage, inflated scores).
+
+Own photos (data/raw_photos/train_only_<YYYY-MM-DD>[_note]/) go through the
+same blur and duplicate filters but ALWAYS land in train. They exist to give
+classes without public data (power_bank, tool_battery) some training examples
+and must never be used to evaluate.
 """
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -22,6 +28,10 @@ SPLITS = ("train", "val", "test", "shift_test")
 # "own"; public datasets (added to train only) use their dataset name.
 OWN_SOURCE = "own"
 MANIFEST_FIELDS = ["image", "split", "source", "session", "video", "frame_index", "blur_score"]
+
+# Photo sessions for training only, e.g. train_only_2026-10-20 or train_only_2026-10-20_powerbanks.
+TRAIN_ONLY_PREFIX = "train_only_"
+TRAIN_ONLY_PATTERN = re.compile(r"^train_only_\d{4}-\d{2}-\d{2}(_[a-z0-9_]+)?$")
 
 
 # ---------------------------------------------------------------- image checks
@@ -85,6 +95,12 @@ def assign_splits(session_names: list[str], split_cfg: dict) -> tuple[dict[str, 
     }
     known = set(session_names)
 
+    # Train-only material must never be used for evaluation.
+    for split, names in listed.items():
+        bad = [n for n in names if n.startswith(TRAIN_ONLY_PREFIX)]
+        if bad:
+            raise ValueError(f"{bad} are train-only sessions and cannot be in {split}_sessions.")
+
     # A typo in the config would otherwise send that session to train.
     for split, names in listed.items():
         missing = [n for n in names if n not in known]
@@ -111,6 +127,23 @@ def assign_splits(session_names: list[str], split_cfg: dict) -> tuple[dict[str, 
 
     warnings = [f"No {s} sessions configured." for s in ("val", "test") if not listed[s]]
     return assignment, warnings
+
+
+def find_photo_sessions(raw_photos_dir: Path, photo_extensions: list[str]) -> dict[str, list[Path]]:
+    """Map train-only photo session folder -> sorted photos. Raises on a badly named folder,
+    so photos can't end up somewhere without their train-only marker."""
+    if not Path(raw_photos_dir).is_dir():
+        return {}
+    exts = {e.lower() for e in photo_extensions}
+    sessions = {}
+    for folder in sorted(p for p in Path(raw_photos_dir).iterdir() if p.is_dir()):
+        if not TRAIN_ONLY_PATTERN.match(folder.name):
+            raise ValueError(f"Photo folder '{folder.name}' must be named train_only_<YYYY-MM-DD>[_note] "
+                             "(lowercase note, e.g. train_only_2026-10-20_powerbanks).")
+        photos = sorted(f for f in folder.iterdir() if f.suffix.lower() in exts)
+        if photos:
+            sessions[folder.name] = photos
+    return sessions
 
 
 # ---------------------------------------------------------------- extraction
@@ -197,12 +230,59 @@ def extract_session(
     return stats, manifest_rows
 
 
+def extract_photo_session(
+    session: str, photos: list[Path], images_root: Path, fe_cfg: dict
+) -> tuple[SessionStats, list[dict]]:
+    """Blur filter -> duplicate filter -> save into images/train/, like a video session.
+
+    The split is fixed to train on purpose: there is no parameter to change it.
+    """
+    out_dir = images_root / "train"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stats = SessionStats(session=session, split="train", videos=0)
+    kept_hashes: list[np.ndarray] = []
+    manifest_rows = []
+
+    for photo in photos:
+        image = cv2.imread(str(photo))  # applies the EXIF rotation, like a photo viewer
+        if image is None:
+            raise RuntimeError(f"Could not read photo: {photo} (HEIC? export as JPEG)")
+        stats.sampled += 1
+
+        score = laplacian_variance(image, fe_cfg["blur_measure_long_side"])
+        stats.blur_scores.append(score)
+        if score < fe_cfg["blur_threshold"]:
+            stats.blurry += 1
+            continue
+
+        h = dhash(image, fe_cfg["hash_size"])
+        if any(hamming(h, k) <= fe_cfg["hamming_threshold"] for k in kept_hashes):
+            stats.duplicates += 1
+            continue
+        kept_hashes.append(h)
+
+        name = f"{session}__{photo.stem}.jpg"
+        cv2.imwrite(str(out_dir / name), image, [cv2.IMWRITE_JPEG_QUALITY, fe_cfg["jpeg_quality"]])
+        stats.kept += 1
+        manifest_rows.append({
+            "image": f"images/train/{name}",
+            "split": "train",
+            "source": OWN_SOURCE,
+            "session": session,
+            "video": photo.name,
+            "frame_index": "",
+            "blur_score": round(score, 1),
+        })
+
+    return stats, manifest_rows
+
+
 # ---------------------------------------------------------------- summary
 
 def summary_table(all_stats: list[SessionStats]) -> str:
     """Markdown table: one row per session, then totals per split."""
     lines = [
-        "| session | split | videos | sampled | blurry removed | duplicates removed | kept | median blur score |",
+        "| session | split | videos (0 = photos) | sampled | blurry removed | duplicates removed | kept | median blur score |",
         "|---|---|---:|---:|---:|---:|---:|---:|",
     ]
     for s in sorted(all_stats, key=lambda s: (SPLITS.index(s.split), s.session)):

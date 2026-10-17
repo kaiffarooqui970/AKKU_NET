@@ -1,0 +1,11 @@
+# Battery and Vape (Roboflow Universe, "david" workspace). CC BY 4.0 as declared by the uploader.
+# Keys must match data.yaml exactly. The page showed class names with version
+# timestamps appended; replace the keys below with the exact names once
+# scripts/inspect_export.py has printed them.
+# Values: one of our classes, null (= drop the box), or PENDING (= import refuses).
+dataset: battery_and_vape
+mapping:
+  # PENDING until the 20-box contact sheet has been reviewed: the class does not
+  # say what kind of battery it is, so loose_cell is not yet confirmed.
+  battery: PENDING
+  vape: vape
