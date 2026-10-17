@@ -8,6 +8,15 @@ floor, **before** they reach the bunker or compactor and start fires.
 > (labelling, training, robustness, live demo, dashboard) are not built yet.
 > Thermal detection is planned for phase 2 (needs real thermal hardware).
 
+## Licence note: Ultralytics YOLO is AGPL-3.0
+
+This demo uses Ultralytics YOLO, which is licensed under **AGPL-3.0**. That is
+fine for this demo and for research. A **commercial product** (e.g. software sold
+to or run as a service for a recycling facility) would need either an
+**Ultralytics Enterprise licence** or a switch to a permissively licensed model.
+Nothing has been changed for this yet; it is documented so the decision is made
+consciously before any commercial pilot.
+
 ## Setup
 
 ```bash
