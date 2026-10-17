@@ -1,0 +1,9 @@
+# Python 3.11. Install with:  pip install -r requirements.txt && pip install -e .
+ultralytics>=8.3        # YOLO11 detection + ByteTrack (pulls in torch, torchvision)
+opencv-python>=4.9      # video reading, image processing
+numpy>=1.26
+pyyaml>=6.0
+pandas>=2.0
+streamlit>=1.35         # Stage 6 dashboard
+grad-cam>=1.5           # Stage 4 EigenCAM heatmaps
+pytest>=8.0

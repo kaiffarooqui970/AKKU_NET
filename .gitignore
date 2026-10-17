@@ -1,0 +1,26 @@
+# Data: videos, frames, labels, smoke-test data (keep only the folder placeholders)
+data/*
+!data/raw_videos/
+data/raw_videos/*
+!data/raw_videos/.gitkeep
+
+# Model weights and Ultralytics run folders
+*.pt
+*.onnx
+runs/
+weights/
+
+# App outputs
+snapshots/
+recordings/
+*.sqlite
+*.db
+
+# Python
+__pycache__/
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ipynb_checkpoints/
+.DS_Store

@@ -1,0 +1,46 @@
+# AkkuNet — single source of truth for all settings.
+# Relative paths are resolved relative to the folder this file lives in.
+
+project_name: AkkuNet
+
+paths:
+  raw_videos: data/raw_videos      # one subfolder per recording session
+  dataset: data/dataset            # extracted frames: images/<split>/..., later labels/<split>/...
+  reports: reports
+
+# Class order matters: the index in this list is the YOLO class ID.
+classes:
+  - vape
+  - power_bank
+  - battery_pack
+  - tool_battery
+  - loose_cell
+
+# "auto" picks CUDA -> Apple MPS -> CPU. Or force one: "cpu", "mps", "cuda".
+device: auto
+
+# ---------------------------------------------------------------- Stage 1
+frame_extraction:
+  every_n_frames: 15              # at 30 fps this is 2 frames per second
+  video_extensions: [.mp4, .mov, .m4v, .avi, .mkv]
+  jpeg_quality: 95
+  # Blur filter: variance of the Laplacian, measured on a copy resized so its
+  # long side is blur_measure_long_side px (so the threshold does not depend on
+  # the phone's resolution). Lower = blurrier. Tune by looking at the
+  # "median blur" column in the summary and at the frames that get removed.
+  blur_threshold: 100.0
+  blur_measure_long_side: 640
+  # Near-duplicate filter: difference hash (dHash) with hash_size x hash_size
+  # bits. A frame is dropped if its hash is within hamming_threshold bits of any
+  # frame already kept from the same session. 16x16 = 256 bits; 10 bits ~ 4%.
+  hash_size: 16
+  hamming_threshold: 10
+
+# Split BY SESSION (never by frame). List session folder names here.
+# Every session not listed under val/test/shift_test goes to train.
+splits:
+  val_sessions: []
+  test_sessions: []
+  # At least one session filmed on a background / lighting NOT used in any
+  # other split. Used to measure how much performance drops under shift.
+  shift_test_sessions: []
