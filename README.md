@@ -4,9 +4,8 @@ A computer-vision demo that spots lithium-battery items (vapes, power banks,
 battery packs, tool batteries, loose cells) in household waste on the tipping
 floor, **before** they reach the bunker or compactor and start fires.
 
-> Status: Stage 0 (setup) and Stage 1 (frame extraction) are done. Part B2
-> (bootstrap model on public data) tooling is built; the datasets still need
-> downloading. Later stages (labelling own footage, robustness, live demo,
+> Status: Stage 0 (setup) and Stage 1 (frame extraction) are done. Part B2:
+> the bootstrap dataset is built from public data; training is next. Later stages (labelling own footage, robustness, live demo,
 > dashboard) are not built yet.
 > Thermal detection is planned for phase 2 (needs real thermal hardware).
 
@@ -56,7 +55,7 @@ scripts/               command-line entry points
 notebooks/             Colab training notebook (Stage 3)
 tests/                 pytest
 reports/               generated markdown reports
-docs/                  guides (docs/labelling_guide.md: classes and labelling decisions)
+docs/                  guides: labelling_guide.md (classes, decisions), robustness_checks.md (planned tests)
 ```
 
 ## Run order so far
@@ -116,15 +115,20 @@ export into `data/external/<name>/` (names in `SOURCES.md`), then:
 ```bash
 python scripts/inspect_export.py battery_and_vape           # splits, sizes, augmentation, leaks
 python scripts/box_contact_sheet.py battery_and_vape battery  # what does a class really contain?
-python scripts/import_external.py kashif_battery            # refuses while a class is unmapped/PENDING
-python scripts/check_vape_person.py battery_and_vape vape   # face-shortcut check
+python scripts/check_vape_person.py battery_and_vape "vape - v1 2024-08-06 1-47am"  # face-shortcut check
+python scripts/build_bootstrap.py                           # drop rules, group near-copies, 85/15 split
 python scripts/train_bootstrap.py bootstrap_v1 --dry-run    # print the command
 python scripts/train_bootstrap.py bootstrap_v1 --benchmark  # estimate run time
 python scripts/train_bootstrap.py bootstrap_v1              # train + per-class report
 ```
 
-Validation is always the exports' `valid` splits of `bootstrap.datasets`
-(bootstrap_val), also when extra train data is added (`--extra`).
+`build_bootstrap.py` refuses while any class is unmapped or `PENDING`. It drops
+images by the `drop_images` rules in each class map and lists every dropped
+file. The exports' own splits leak copies, so it ignores them: all kept images
+are pooled, near-copies (same source name, or mirrored, rotated or greyscale
+duplicates) are grouped, and whole groups are split about 85% train / 15%
+bootstrap_val per class. See `reports/bootstrap_dataset.md` and
+`reports/finding_vape_cloud_labels.md`.
 
 ### Smoke test (pipeline check only)
 ```bash

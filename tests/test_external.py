@@ -1,14 +1,13 @@
 """Tests for Part B2 public-dataset import (synthetic Roboflow-style exports only)."""
-import csv
-
 import cv2
 import numpy as np
 import pytest
 import yaml
 
 from akkunet.evaluate import count_boxes, write_run_dataset
-from akkunet.external import (augmentation_base_name, check_class_map, import_export, inspect_export,
-                              read_boxes, remove_source, update_manifest)
+from akkunet.external import (BOOTSTRAP_MANIFEST_FIELDS, ONLY_OUT_OF_SCOPE, Candidate, augmentation_base_name,
+                              check_class_map, collect_dataset, group_near_copies, hash_variants, inspect_export,
+                              read_boxes, split_groups, write_bootstrap, write_csv)
 
 CLASSES = ["vape", "power_bank", "battery_pack", "tool_battery", "loose_cell"]
 SOURCE_NAMES = ["Car Battery", "Dry Cell", "Laptop Battery"]
@@ -76,54 +75,86 @@ def test_inspect_counts(export):
     assert "valid" in leaks
 
 
-def test_import_remaps_and_skips_images_with_only_dropped_classes(export, tmp_path):
-    out = tmp_path / "bootstrap"
-    stats, rows = import_export("kashif", export, {"mapping": MAPPING}, CLASSES, out)
+def collect(export, mapping=MAPPING, rules=None):
+    return collect_dataset("kashif", export, {"mapping": mapping, "drop_images": rules or []}, CLASSES)
 
-    assert stats.only_dropped["train"] == 1          # car-only image skipped
-    assert stats.background["train"] == 1            # empty image kept
-    assert stats.mixed["train"] == 1
-    assert stats.imported == {"train": 4, "val": 1}
-    assert not (out / "images" / "train" / "kashif__car_jpg.rf.ccc.jpg").exists()
-    assert (out / "labels" / "train" / "kashif__mixed_jpg.rf.ddd.txt").read_text().split()[0] == "2"
+
+def test_collect_remaps_and_drops_images_with_only_out_of_scope_classes(export):
+    kept, dropped = collect(export)
+    names = {c.path.stem: c for c in kept}
+    assert [d["original_file"] for d in dropped] == ["car_jpg.rf.ccc.jpg"]
+    assert dropped[0]["rule"] == ONLY_OUT_OF_SCOPE
+    assert names["mixed_jpg.rf.ddd"].boxes[0][0] == 2 and names["mixed_jpg.rf.ddd"].boxes_dropped == 1
+    assert names["empty_jpg.rf.eee"].boxes == []          # genuine background kept
+    assert names["v_jpg.rf.fff"].original_split == "valid"
+
+
+def test_drop_rules_need_all_conditions(export):
+    rules = [{"name": "no_dry_cell_a", "has_class": "Dry Cell", "filename": "^a_"},
+             {"name": "laptop_not_v", "has_class": "Laptop Battery", "filename_not": "^v_"}]
+    _, dropped = collect(export, rules=rules)
+    by_rule = {d["original_file"]: d["rule"] for d in dropped}
+    assert by_rule["a_jpg.rf.aaa.jpg"] == by_rule["a_jpg.rf.bbb.jpg"] == "no_dry_cell_a"
+    assert by_rule["mixed_jpg.rf.ddd.jpg"] == "laptop_not_v"
+    assert "v_jpg.rf.fff.jpg" not in by_rule
+
+
+def test_drop_rule_with_unknown_class_is_refused(export):
+    with pytest.raises(ValueError, match="unknown class"):
+        collect(export, rules=[{"name": "x", "has_class": "Nope"}])
+    with pytest.raises(ValueError, match="PENDING"):
+        collect(export, mapping={**MAPPING, "Dry Cell": "PENDING"})
+
+
+def test_mirrored_rotated_and_grey_copies_are_grouped(tmp_path):
+    def img(seed):
+        b = np.random.default_rng(seed).integers(0, 256, (12, 12, 3), dtype=np.uint8)
+        return cv2.resize(b, (96, 96), interpolation=cv2.INTER_NEAREST)
+    a, other = img(1), img(2)
+    grey = cv2.cvtColor(cv2.cvtColor(a, cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR)
+    images = [a, cv2.flip(a, 1), cv2.rotate(a, cv2.ROTATE_90_CLOCKWISE), grey, other]
+    cands = [Candidate("d", tmp_path / f"f{i}.jpg", "train", [], 0) for i in range(len(images))]
+    groups = group_near_copies(cands, np.stack([hash_variants(im) for im in images]))
+    assert len(set(groups[:4])) == 1 and groups[4] != groups[0]
+
+
+def test_same_source_name_is_grouped_even_if_images_differ(export):
+    kept, _ = collect(export)
+    hashes = np.stack([hash_variants(cv2.imread(str(c.path))) for c in kept])
+    groups = group_near_copies(kept, hashes, threshold=0)
+    g = {c.path.stem: grp for c, grp in zip(kept, groups)}
+    assert g["a_jpg.rf.aaa"] == g["a_jpg.rf.bbb"]
+    assert g["a_jpg.rf.aaa"] != g["mixed_jpg.rf.ddd"]
+
+
+def test_split_keeps_groups_whole_and_near_target(tmp_path):
+    # 100 groups of 1-3 images, each image one loose_cell box.
+    cands, groups = [], []
+    for g in range(100):
+        for _ in range(1 + g % 3):
+            cands.append(Candidate("d", tmp_path / f"{len(cands)}.jpg", "train", [(4, .5, .5, .1, .1)], 0))
+            groups.append(g)
+    assignment = split_groups(cands, groups, CLASSES, val_fraction=0.15, seed=0)
+    val_images = sum(assignment[g] == "val" for g in groups)
+    assert 0.10 * len(cands) <= val_images <= 0.15 * len(cands)
+    assert set(assignment.values()) == {"train", "val"}
+
+
+def test_write_bootstrap_and_run_lists(export, tmp_path):
+    kept, _ = collect(export)
+    groups = list(range(len(kept)))
+    assignment = {g: ("val" if kept[g].original_split == "valid" else "train") for g in groups}
+    out = tmp_path / "bootstrap"
+    (out / "images" / "train").mkdir(parents=True)
+    (out / "images" / "train" / "stale.jpg").write_bytes(b"x")       # rebuilt from scratch
+    rows = write_bootstrap(kept, groups, assignment, CLASSES, out)
+    write_csv(out / "manifest.csv", rows, BOOTSTRAP_MANIFEST_FIELDS)
+
+    assert not (out / "images" / "train" / "stale.jpg").exists()
     assert (out / "labels" / "val" / "kashif__v_jpg.rf.fff.txt").read_text().startswith("2 ")
     assert (out / "labels" / "train" / "kashif__empty_jpg.rf.eee.txt").read_text() == ""
-    assert stats.boxes["train"]["loose_cell"] == 2 and stats.boxes["train"]["battery_pack"] == 1
-    assert {r["source"] for r in rows} == {"kashif"}
-
-
-def test_import_refuses_pending_map(export, tmp_path):
-    with pytest.raises(ValueError, match="PENDING"):
-        import_export("kashif", export, {"mapping": {**MAPPING, "Dry Cell": "PENDING"}}, CLASSES, tmp_path / "b")
-
-
-def test_train_cap_and_reimport_replace(export, tmp_path):
-    out = tmp_path / "bootstrap"
-    stats, rows = import_export("kashif", export, {"mapping": MAPPING}, CLASSES, out, max_train_images=2)
-    assert stats.images_in["train"] == 2
-    update_manifest(out, "kashif", rows)
-    update_manifest(out, "other", [{**rows[0], "source": "other"}])
-    assert remove_source(out, "kashif") == len(rows)
-    update_manifest(out, "kashif", [])
-    with open(out / "manifest.csv") as f:
-        assert {r["source"] for r in csv.DictReader(f)} == {"other"}
-
-
-def test_run_dataset_keeps_val_fixed_when_extra_train_data_is_added(export, tmp_path):
-    out = tmp_path / "bootstrap"
-    _, rows = import_export("kashif", export, {"mapping": MAPPING}, CLASSES, out)
-    update_manifest(out, "kashif", rows)
-    extra = make_export(tmp_path / "gvl", {"train": {"w_jpg.rf.111": ["1 0.5 0.5 0.1 0.1"]},
-                                           "valid": {"wv_jpg.rf.222": ["1 0.5 0.5 0.1 0.1"]}})
-    _, rows = import_export("gvl", extra, {"mapping": MAPPING}, CLASSES, out)
-    update_manifest(out, "gvl", rows)
-
-    base = write_run_dataset(out, "base", CLASSES, ["kashif"], ["kashif"])
-    plus = write_run_dataset(out, "plus", CLASSES, ["kashif", "gvl"], ["kashif"])
-    lists = out / "lists"
-    assert (lists / "base_val.txt").read_text() == (lists / "plus_val.txt").read_text()
-    assert len((lists / "plus_train.txt").read_text().split()) == len((lists / "base_train.txt").read_text().split()) + 1
-    assert yaml.safe_load(base.read_text())["names"] == dict(enumerate(CLASSES))
-    assert count_boxes(lists / "base_val.txt", CLASSES)["battery_pack"] == 1
+    data_yaml = write_run_dataset(out, "run", CLASSES, ["kashif"], ["kashif"])
+    assert yaml.safe_load(data_yaml.read_text())["names"] == dict(enumerate(CLASSES))
+    assert count_boxes(out / "lists" / "run_val.txt", CLASSES)["battery_pack"] == 1
     with pytest.raises(ValueError, match="Not imported"):
         write_run_dataset(out, "x", CLASSES, ["nope"], ["kashif"])

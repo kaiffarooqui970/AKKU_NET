@@ -53,7 +53,9 @@ splits:
 # ---------------------------------------------------------------- Bootstrap (Part B2)
 # A first model trained ONLY on public data, to have something for the webcam
 # demo before own footage is labelled. Its scores say nothing about the
-# tipping floor. Validation = the exports' own "valid" splits (bootstrap_val).
+# tipping floor. The exports' own splits leak (mirrored/rotated copies of one
+# image in train and valid), so all kept images are pooled, near-copies are
+# grouped, and whole groups are split into train / bootstrap_val.
 bootstrap:
   datasets: [battery_and_vape, kashif_battery]
   model: yolo11n.pt        # nano, COCO-pretrained
@@ -62,5 +64,5 @@ bootstrap:
   batch: 16
   patience: 15             # stop early if val mAP has not improved for this many epochs
   seed: 0
-  # Optional experiment: add at most this many gvl610 (top-down, white sheet) images.
-  gvl610_max_train_images: 1500
+  val_fraction: 0.15       # share of every class's images in bootstrap_val
+  near_copy_hamming: 10    # dHash bits (of 256) within which two images count as copies

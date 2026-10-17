@@ -1,11 +1,20 @@
-# Battery Detection (Roboflow Universe, Kashif). CC BY 4.0 as declared by the uploader.
-# Keys must match data.yaml exactly (check with scripts/inspect_export.py).
+# Battery Detection (Roboflow Universe, Kashif; forked to our workspace as
+# battery-detection-7dnqh-yk0pu v1). CC BY 4.0 as declared by the uploader.
 # Car and bike (starter/lead-acid) batteries are out of scope -> null. Images
 # whose boxes are ALL dropped are skipped, not kept as background.
 dataset: kashif_battery
 mapping:
+  Automotive Battery: null
+  Bike Battery: null
+  Dry Cell: loose_cell
   Laptop Battery: battery_pack
   Smartphone Battery: battery_pack
-  Dry Cell: loose_cell
-  Car Battery: null
-  Bike Battery: null
+
+drop_images:
+  # 548 of 2,180 Laptop Battery images are X-ray baggage scans (decided 2026-10-17).
+  - name: xray_scan
+    filename: '^xray_'
+
+# Printed in reports/bootstrap_dataset.md.
+notes:
+  - "548 X-ray baggage scans (all Laptop Battery) dropped."

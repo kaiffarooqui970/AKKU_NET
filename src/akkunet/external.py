@@ -9,7 +9,12 @@ A Roboflow export looks like:
 Each dataset has a class map (configs/class_maps/<name>.yaml) that maps every
 source class to one of our classes, or to null (= drop the box). A source class
 that is missing from the map, or mapped to PENDING, stops the import: every
-class needs a conscious decision.
+class needs a conscious decision. The map can also list `drop_images` rules
+(e.g. X-ray scans); every dropped file is listed with its rule.
+
+The exports' own splits are NOT used: they leak (mirrored/rotated copies of
+one original sit in train and valid). All kept images are pooled, near-copies
+are grouped, and whole groups are split into train / bootstrap_val.
 
 Imported data goes to data/bootstrap/, never into data/dataset/ (own footage),
 so public images can never end up in our val/test/shift_test splits.
@@ -31,7 +36,9 @@ IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 # Roboflow's split folder -> our split name. "valid" becomes bootstrap_val.
 SPLIT_NAMES = {"train": "train", "valid": "val", "test": "test"}
 PENDING = "PENDING"
-BOOTSTRAP_MANIFEST_FIELDS = ["image", "split", "source", "original_file", "boxes_kept", "boxes_dropped"]
+BOOTSTRAP_MANIFEST_FIELDS = ["image", "split", "source", "original_split", "original_file", "group",
+                             "boxes_kept", "boxes_dropped"]
+DROPPED_FIELDS = ["source", "original_split", "original_file", "rule"]
 
 
 # ---------------------------------------------------------------- reading an export
@@ -222,100 +229,197 @@ def remap_boxes(boxes, source_names, mapping, classes):
     return kept, dropped
 
 
-# ---------------------------------------------------------------- import
+# ---------------------------------------------------------------- drop rules
+
+ONLY_OUT_OF_SCOPE = "only_out_of_scope_classes"
+
+
+def check_drop_rules(rules: list[dict], source_names: list[str]) -> list[str]:
+    """Problems with a map's drop_images rules (empty list = OK)."""
+    problems = []
+    for r in rules:
+        if not r.get("name"):
+            problems.append(f"drop rule {r} has no name")
+        if not {"filename", "filename_not", "has_class"} & set(r):
+            problems.append(f"drop rule '{r.get('name')}' has no condition")
+        if "has_class" in r and r["has_class"] not in source_names:
+            problems.append(f"drop rule '{r.get('name')}' uses unknown class '{r['has_class']}'")
+    return problems
+
+
+def drop_rule(file_name: str, source_classes: set[str], rules: list[dict]) -> str | None:
+    """Name of the first rule that drops this image, or None.
+
+    A rule drops an image when ALL of its conditions hold:
+      filename:      regex found in the source filename
+      filename_not:  regex NOT found in the source filename
+      has_class:     this source class has a box in the image
+    """
+    for r in rules:
+        if "filename" in r and not re.search(r["filename"], file_name):
+            continue
+        if "filename_not" in r and re.search(r["filename_not"], file_name):
+            continue
+        if "has_class" in r and r["has_class"] not in source_classes:
+            continue
+        return r["name"]
+    return None
+
+
+# ---------------------------------------------------------------- collecting
 
 @dataclass
-class ImportStats:
-    images_in: Counter = field(default_factory=Counter)
-    imported: Counter = field(default_factory=Counter)
-    background: Counter = field(default_factory=Counter)        # had no boxes in the export
-    only_dropped: Counter = field(default_factory=Counter)      # every box was dropped -> skipped
-    mixed: Counter = field(default_factory=Counter)             # some boxes dropped, image kept
-    boxes: dict = field(default_factory=lambda: defaultdict(Counter))  # split -> our class -> n
+class Candidate:
+    """One image that survived the drop rules, with boxes already in our class IDs."""
+    source: str
+    path: Path
+    original_split: str
+    boxes: list
+    boxes_dropped: int
 
 
-def import_export(name: str, export_dir: Path, cmap: dict, classes: list[str],
-                  bootstrap_dir: Path, max_train_images: int | None = None,
-                  seed: int = 0) -> tuple[ImportStats, list[dict]]:
-    """Copy one export into bootstrap_dir/{images,labels}/<split>/ with remapped labels.
+def collect_dataset(name: str, export_dir: Path, cmap: dict, classes: list[str]
+                    ) -> tuple[list[Candidate], list[dict]]:
+    """Apply the class map and drop rules to one export.
 
-    Rules:
-      - images whose boxes were ALL dropped are skipped, not kept as background
-        (a car battery labelled as 'nothing' would teach the wrong thing)
-      - images that had no boxes in the export are kept as genuine background
-      - filenames are prefixed with the dataset name so sources never collide
-    `max_train_images` caps the train split (random sample with `seed`).
+    Returns (kept candidates, dropped rows). Images whose boxes are ALL mapped to
+    null are dropped too (rule only_out_of_scope_classes), not kept as background:
+    a car battery labelled as 'nothing' would teach the wrong thing. Images with
+    no boxes in the export are kept as genuine background.
     """
     source_names = read_class_names(export_dir)
-    mapping = cmap["mapping"]
-    problems = check_class_map(mapping, source_names, classes)
+    mapping, rules = cmap["mapping"], cmap.get("drop_images") or []
+    problems = check_class_map(mapping, source_names, classes) + check_drop_rules(rules, source_names)
     if problems:
         raise ValueError(f"Class map for {name} is not ready:\n  - " + "\n  - ".join(problems))
 
-    stats, rows = ImportStats(), []
+    kept, dropped = [], []
     for rf_split, images in find_split_images(export_dir).items():
-        split = SPLIT_NAMES[rf_split]
-        if split == "train" and max_train_images and len(images) > max_train_images:
-            rng = np.random.default_rng(seed)
-            images = sorted(rng.choice(images, size=max_train_images, replace=False))
-        img_out = bootstrap_dir / "images" / split
-        lbl_out = bootstrap_dir / "labels" / split
-        img_out.mkdir(parents=True, exist_ok=True)
-        lbl_out.mkdir(parents=True, exist_ok=True)
-
         for p in images:
-            stats.images_in[split] += 1
             boxes, _ = read_boxes(label_path_for(p))
-            kept, dropped = remap_boxes(boxes, source_names, mapping, classes)
-            if boxes and not kept:
-                stats.only_dropped[split] += 1
-                continue
-            if not boxes:
-                stats.background[split] += 1
-            if dropped and kept:
-                stats.mixed[split] += 1
-
-            out_name = f"{name}__{p.stem}"
-            shutil.copy2(p, img_out / (out_name + p.suffix.lower()))
-            (lbl_out / (out_name + ".txt")).write_text(
-                "".join(f"{c} {x:.6f} {y:.6f} {w:.6f} {h:.6f}\n" for c, x, y, w, h in kept))
-            stats.imported[split] += 1
-            stats.boxes[split].update(classes[b[0]] for b in kept)
-            rows.append({"image": f"images/{split}/{out_name}{p.suffix.lower()}", "split": split,
-                         "source": name, "original_file": p.name,
-                         "boxes_kept": len(kept), "boxes_dropped": dropped})
-    return stats, rows
+            rule = drop_rule(p.name, {source_names[b[0]] for b in boxes}, rules)
+            ours, n_dropped = remap_boxes(boxes, source_names, mapping, classes)
+            if rule is None and boxes and not ours:
+                rule = ONLY_OUT_OF_SCOPE
+            if rule:
+                dropped.append({"source": name, "original_split": rf_split, "original_file": p.name, "rule": rule})
+            else:
+                kept.append(Candidate(name, p, rf_split, ours, n_dropped))
+    return kept, dropped
 
 
-def remove_source(bootstrap_dir: Path, name: str) -> int:
-    """Delete everything previously imported from one dataset (so re-imports are clean)."""
-    removed = 0
-    for sub in ("images", "labels"):
-        for p in (bootstrap_dir / sub).glob(f"*/{name}__*"):
-            p.unlink()
-            removed += sub == "images"
-    return removed
+# ---------------------------------------------------------------- near-copy groups
+
+def hash_variants(image: np.ndarray) -> np.ndarray:
+    """dHash of the image, its mirror and both 90-degree rotations, packed to 4 x uint64 each.
+
+    dHash works on greyscale, so greyscale copies match their colour original.
+    """
+    variants = [image, cv2.flip(image, 1), cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE),
+                cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)]
+    return np.stack([np.packbits(dhash(v)).view(np.uint64) for v in variants])
 
 
-def update_manifest(bootstrap_dir: Path, name: str, rows: list[dict]) -> None:
-    """Replace this dataset's rows in bootstrap_dir/manifest.csv, keeping other datasets' rows."""
-    path = bootstrap_dir / "manifest.csv"
-    existing = []
-    if path.exists():
-        with open(path, newline="") as f:
-            existing = [r for r in csv.DictReader(f) if r["source"] != name]
+def group_near_copies(cands: list[Candidate], hashes: np.ndarray, threshold: int = 10) -> list[int]:
+    """Group id per candidate. Two images share a group if (transitively):
+      - they come from the same dataset and have the same Roboflow source name
+        (augmented copies, incl. crops and cutout that hashing can miss), or
+      - one is within `threshold` dHash bits of the other, its mirror or a 90° rotation.
+    """
+    parent = list(range(len(cands)))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    def union(i, j):
+        parent[find(i)] = find(j)
+
+    first = {}
+    for i, c in enumerate(cands):
+        key = (c.source, augmentation_base_name(c.path))
+        if key in first:
+            union(i, first[key])
+        else:
+            first[key] = i
+
+    base = hashes[:, 0]                                   # (N, 4)
+    for start in range(0, len(cands), 256):
+        block = base[start:start + 256, None, :]          # (b, 1, 4)
+        dist = np.min([np.bitwise_count(block ^ hashes[None, :, k]).sum(-1) for k in range(4)], axis=0)
+        for a, b in zip(*np.nonzero(dist <= threshold)):
+            if start + a != b:
+                union(start + a, int(b))
+
+    roots = {}
+    return [roots.setdefault(find(i), len(roots)) for i in range(len(cands))]
+
+
+def split_groups(cands: list[Candidate], groups: list[int], classes: list[str],
+                 val_fraction: float, seed: int = 0) -> dict[int, str]:
+    """Assign whole groups to train or val, aiming at `val_fraction` of the images of every class.
+
+    Groups are visited in random order; a group goes to val only if that keeps
+    every class it contains (and the background images) at or below its val
+    target. So per-class val shares end up close to, never far above, the target.
+    """
+    members = defaultdict(list)
+    for i, g in enumerate(groups):
+        members[g].append(i)
+
+    def kinds(i):  # what an image counts towards: its classes, or "background"
+        return {classes[b[0]] for b in cands[i].boxes} or {"background"}
+
+    total = Counter(k for i in range(len(cands)) for k in kinds(i))
+    target = {k: val_fraction * n for k, n in total.items()}
+    in_val = Counter()
+    order = np.random.default_rng(seed).permutation(sorted(members))
+    assignment = {}
+    for g in order:
+        need = Counter(k for i in members[g] for k in kinds(i))
+        if all(in_val[k] + n <= target[k] for k, n in need.items()):
+            assignment[int(g)] = "val"
+            in_val.update(need)
+        else:
+            assignment[int(g)] = "train"
+    return assignment
+
+
+# ---------------------------------------------------------------- writing
+
+def write_bootstrap(cands: list[Candidate], groups: list[int], assignment: dict[int, str],
+                    classes: list[str], bootstrap_dir: Path) -> list[dict]:
+    """(Re)build bootstrap_dir/{images,labels}/{train,val}/ and return manifest rows.
+
+    The whole folder is rebuilt every time, so a changed rule never leaves stale
+    images behind. Filenames are prefixed with the dataset name.
+    """
+    for sub in ("images", "labels", "lists"):
+        shutil.rmtree(bootstrap_dir / sub, ignore_errors=True)
+    rows, seen = [], set()
+    for c, g in zip(cands, groups):
+        split = assignment[g]
+        out_name = f"{c.source}__{c.path.stem}"
+        if out_name in seen:
+            raise ValueError(f"Two images would both be called {out_name}")
+        seen.add(out_name)
+        img_out = bootstrap_dir / "images" / split / (out_name + c.path.suffix.lower())
+        lbl_out = bootstrap_dir / "labels" / split / (out_name + ".txt")
+        img_out.parent.mkdir(parents=True, exist_ok=True)
+        lbl_out.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(c.path, img_out)
+        lbl_out.write_text("".join(f"{k} {x:.6f} {y:.6f} {w:.6f} {h:.6f}\n" for k, x, y, w, h in c.boxes))
+        rows.append({"image": str(img_out.relative_to(bootstrap_dir)), "split": split, "source": c.source,
+                     "original_split": c.original_split, "original_file": c.path.name, "group": g,
+                     "boxes_kept": len(c.boxes), "boxes_dropped": c.boxes_dropped})
+    return rows
+
+
+def write_csv(path: Path, rows: list[dict], fields: list[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=BOOTSTRAP_MANIFEST_FIELDS)
+        writer = csv.DictWriter(f, fieldnames=fields)
         writer.writeheader()
-        writer.writerows(existing + rows)
-
-
-def write_data_yaml(bootstrap_dir: Path, classes: list[str]) -> Path:
-    """Ultralytics dataset file. All 5 classes are listed even without data, so IDs never change."""
-    data = {"path": str(bootstrap_dir), "train": "images/train", "val": "images/val",
-            "names": dict(enumerate(classes))}
-    if (bootstrap_dir / "images" / "test").is_dir():
-        data["test"] = "images/test"
-    out = bootstrap_dir / "bootstrap.yaml"
-    out.write_text("# BOOTSTRAP ONLY - public data, not tipping-floor data\n" + yaml.safe_dump(data, sort_keys=False))
-    return out
+        writer.writerows(rows)

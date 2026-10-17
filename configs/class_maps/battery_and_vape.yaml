@@ -1,11 +1,34 @@
-# Battery and Vape (Roboflow Universe, "david" workspace). CC BY 4.0 as declared by the uploader.
-# Keys must match data.yaml exactly. The page showed class names with version
-# timestamps appended; replace the keys below with the exact names once
-# scripts/inspect_export.py has printed them.
+# Battery and Vape (Roboflow Universe, "david" workspace; forked to our workspace
+# as battery-and-vape-cp2zi v1). CC BY 4.0 as declared by the uploader.
 # Values: one of our classes, null (= drop the box), or PENDING (= import refuses).
 dataset: battery_and_vape
 mapping:
-  # PENDING until the 20-box contact sheet has been reviewed: the class does not
-  # say what kind of battery it is, so loose_cell is not yet confirmed.
-  battery: PENDING
-  vape: vape
+  # Decided 2026-10-17 after the 20-box contact sheet: mostly loose cells
+  # (AA/AAA, C/D, 18650, 9V), but ~15-20% are flat smartphone battery packs.
+  # Accepted as label noise for the bootstrap model (see SOURCES.md).
+  battery - v1 2024-06-26 4-12am: loose_cell
+  vape - v1 2024-08-06 1-47am: vape
+
+# Images dropped entirely (all conditions of a rule must hold). Every dropped
+# file is listed in reports/external/bootstrap_dropped.csv with its rule.
+drop_images:
+  # Label-quality finding (2026-10-17): about half of the vape boxes mark the
+  # vapour CLOUD, not the device. Image_<n> and Download-<n>-_mp4 files were
+  # clouds in 10/10 sampled boxes each; <n>_jpg and IMG_<n> were devices in
+  # 10/10; all other names were mixed (~3/10 clouds). Keep only the two device
+  # groups for vape images. No image has both a vape and a battery box, so
+  # battery images are not affected.
+  - name: vape_cloud_image_n
+    has_class: vape - v1 2024-08-06 1-47am
+    filename: '^(?i:image)_\d+'
+  - name: vape_cloud_download_mp4
+    has_class: vape - v1 2024-08-06 1-47am
+    filename: '^Download-\d+-_mp4'
+  - name: vape_mixed_unreviewed
+    has_class: vape - v1 2024-08-06 1-47am
+    filename_not: '^(-?\d+_|(?i:img)_\d+)'
+
+# Printed in reports/bootstrap_dataset.md.
+notes:
+  - "Known label noise: battery -> loose_cell, but ~15-20% of sampled battery boxes (3-4 of 20) are flat smartphone battery packs (should be battery_pack). Accepted for the bootstrap model; expect some battery_pack/loose_cell confusion."
+  - "About half of the original vape boxes marked the vapour cloud, not the device; only the device filename groups are kept (reports/finding_vape_cloud_labels.md)."

@@ -4,11 +4,9 @@ Usage:
     python scripts/train_bootstrap.py bootstrap_v1 --dry-run        # print command, write lists
     python scripts/train_bootstrap.py bootstrap_v1 --benchmark      # time 10% of one epoch -> estimate
     python scripts/train_bootstrap.py bootstrap_v1                  # train + per-class report
-    python scripts/train_bootstrap.py bootstrap_gvl610 --extra gvl610_battery
 
-Train = config bootstrap.datasets (+ --extra). Val is ALWAYS the valid split of
-bootstrap.datasets only, so runs with and without extras are compared on the
-same images.
+Run scripts/build_bootstrap.py first. Train / val = the group split it made
+(val = bootstrap_val).
 
 Output:
     runs/bootstrap/<run>/                 Ultralytics run (weights/best.pt, plots)
@@ -30,7 +28,6 @@ BENCHMARK_FRACTION = 0.1
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("run", help="run name, e.g. bootstrap_v1")
-    parser.add_argument("--extra", nargs="*", default=[], help="extra imported datasets for TRAIN only")
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--dry-run", action="store_true")
     group.add_argument("--benchmark", action="store_true")
@@ -41,7 +38,7 @@ def main() -> int:
     bs, classes = cfg["bootstrap"], cfg["classes"]
     try:
         data_yaml = write_run_dataset(cfg["paths"]["bootstrap"], args.run, classes,
-                                      train_sources=bs["datasets"] + args.extra, val_sources=bs["datasets"])
+                                      train_sources=bs["datasets"], val_sources=bs["datasets"])
     except (ValueError, FileNotFoundError) as e:
         print(f"Cannot build the dataset: {e}")
         return 1
@@ -61,13 +58,24 @@ def main() -> int:
     from ultralytics import YOLO
 
     if args.benchmark:
-        start = time.time()
-        YOLO(bs["model"]).train(**{**train_args, "epochs": 1, "fraction": BENCHMARK_FRACTION, "val": False,
-                                   "plots": False, "name": f"{args.run}_benchmark", "exist_ok": True})
-        per_epoch = (time.time() - start) / BENCHMARK_FRACTION
-        print(f"\n~{per_epoch / 60:.1f} min per epoch (train only, extrapolated from {BENCHMARK_FRACTION:.0%}) "
-              f"-> up to ~{per_epoch * bs['epochs'] / 3600:.1f} h for {bs['epochs']} epochs, plus validation "
-              f"each epoch. Early stopping (patience {bs['patience']}) can end it sooner.")
+        # Time only the training loop and one validation pass (callbacks), not
+        # start-up, dataset scanning or plotting, then scale to a full run.
+        marks = {}
+        model = YOLO(bs["model"])
+        model.add_callback("on_train_epoch_start", lambda t: marks.__setitem__("train0", time.time()))
+        model.add_callback("on_train_epoch_end", lambda t: marks.__setitem__("train1", time.time()))
+        model.add_callback("on_val_start", lambda v: marks.__setitem__("val0", time.time()))
+        model.add_callback("on_val_end", lambda v: marks.__setitem__("val1", time.time()))
+        model.train(**{**train_args, "epochs": 1, "fraction": BENCHMARK_FRACTION, "plots": False,
+                       "name": f"{args.run}_benchmark", "exist_ok": True})
+        train_epoch = (marks["train1"] - marks["train0"]) / BENCHMARK_FRACTION
+        val_pass = marks["val1"] - marks["val0"]
+        per_epoch = train_epoch + val_pass
+        print(f"\nTraining loop ~{train_epoch / 60:.1f} min per full epoch (scaled from {BENCHMARK_FRACTION:.0%}), "
+              f"validation ~{val_pass:.0f} s per epoch -> ~{per_epoch / 60:.1f} min per epoch.\n"
+              f"{bs['epochs']} epochs: up to ~{per_epoch * bs['epochs'] / 3600:.1f} h. Early stopping "
+              f"(patience {bs['patience']}) usually ends it sooner; e.g. 40 epochs = "
+              f"~{per_epoch * 40 / 3600:.1f} h.")
         return 0
 
     model = YOLO(bs["model"])
@@ -77,8 +85,9 @@ def main() -> int:
                                   project=str(REPO_ROOT / "runs" / "bootstrap"), name=f"{args.run}_val")
     val_counts = count_boxes(data_yaml.parent / "lists" / f"{args.run}_val.txt", classes)
     md = (f"# Bootstrap metrics: {args.run}\n\n{BOOTSTRAP_BANNER}\n\n"
-          f"Public data only. Train: {bs['datasets'] + args.extra} ({n_train} images). "
-          f"Val: bootstrap_val = valid splits of {bs['datasets']} ({n_val} images). "
+          f"Public data only: {bs['datasets']}. Train {n_train} images, bootstrap_val {n_val} images "
+          f"(split by near-copy group, see reports/bootstrap_dataset.md; val is still the same kind of "
+          f"internet photos as train). "
           f"Model {bs['model']}, imgsz {bs['imgsz']}, device {device}. Weights: `{best.relative_to(REPO_ROOT)}`\n\n"
           f"{per_class_table(metrics, classes, val_counts)}\n\n{BOOTSTRAP_BANNER}\n")
     out = cfg["paths"]["reports"] / f"bootstrap_{args.run}_metrics.md"
