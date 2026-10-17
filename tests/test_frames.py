@@ -1,9 +1,17 @@
 """Tests for Stage 1 frame extraction (synthetic data only)."""
+import csv
+import subprocess
+import sys
+from pathlib import Path
+
 import cv2
 import numpy as np
+import yaml
 import pytest
 
 from akkunet.frames import (
+    MANIFEST_FIELDS,
+    OWN_SOURCE,
     assign_splits,
     dhash,
     extract_session,
@@ -138,3 +146,34 @@ def test_find_sessions_ignores_non_videos(tmp_path):
     sessions = find_sessions(tmp_path, [".mp4", ".mov"])
     assert list(sessions) == ["session_01"]
     assert [v.name for v in sessions["session_01"]] == ["clip.mp4"]
+
+
+# ---------------------------------------------------------------- provenance
+
+def test_manifest_rows_are_marked_as_own_footage(tmp_path):
+    video = tmp_path / "clip.mp4"
+    make_synthetic_video(video, n_scenes=2, frames_per_scene=1, n_blurry_scenes=0)
+    _, rows = extract_session("s", "train", [video], tmp_path / "images", FE_CFG)
+    assert rows and all(r["source"] == OWN_SOURCE == "own" for r in rows)
+    assert all(list(r) == MANIFEST_FIELDS for r in rows)
+
+
+def test_extract_frames_script_writes_source_column(tmp_path):
+    for name in ("s_train", "s_shift"):
+        make_synthetic_video(tmp_path / "raw" / name / "clip.mp4", n_scenes=2, frames_per_scene=1, n_blurry_scenes=0)
+    cfg = yaml.safe_load((Path(__file__).resolve().parents[1] / "config.yaml").read_text())
+    cfg["paths"] = {"raw_videos": "raw", "dataset": "dataset", "reports": "reports"}
+    cfg["frame_extraction"]["every_n_frames"] = 1
+    cfg["splits"] = {"shift_test_sessions": ["s_shift"]}
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump(cfg))
+
+    script = Path(__file__).resolve().parents[1] / "scripts" / "extract_frames.py"
+    result = subprocess.run([sys.executable, str(script), "--config", str(tmp_path / "config.yaml")],
+                            capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    with open(tmp_path / "dataset" / "manifest.csv") as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+    assert reader.fieldnames == MANIFEST_FIELDS
+    assert len(rows) == 4 and {r["source"] for r in rows} == {"own"}

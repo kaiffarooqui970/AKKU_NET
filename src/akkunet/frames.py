@@ -18,6 +18,11 @@ import numpy as np
 
 SPLITS = ("train", "val", "test", "shift_test")
 
+# Origin of every frame in manifest.csv. Frames from my own recordings are
+# "own"; public datasets (added to train only) use their dataset name.
+OWN_SOURCE = "own"
+MANIFEST_FIELDS = ["image", "split", "source", "session", "video", "frame_index", "blur_score"]
+
 
 # ---------------------------------------------------------------- image checks
 
@@ -181,6 +186,7 @@ def extract_session(
             manifest_rows.append({
                 "image": f"images/{split}/{name}",
                 "split": split,
+                "source": OWN_SOURCE,
                 "session": session,
                 "video": video.name,
                 "frame_index": frame_idx,

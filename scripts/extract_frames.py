@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 from akkunet.config import load_config
-from akkunet.frames import assign_splits, extract_session, find_sessions, summary_table
+from akkunet.frames import MANIFEST_FIELDS, assign_splits, extract_session, find_sessions, summary_table
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -74,7 +74,7 @@ def main() -> int:
 
     dataset_dir.mkdir(parents=True, exist_ok=True)
     with open(dataset_dir / "manifest.csv", "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["image", "split", "session", "video", "frame_index", "blur_score"])
+        writer = csv.DictWriter(f, fieldnames=MANIFEST_FIELDS)
         writer.writeheader()
         writer.writerows(manifest)
 

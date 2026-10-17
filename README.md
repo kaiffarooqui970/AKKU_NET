@@ -77,7 +77,8 @@ python scripts/extract_frames.py              # add --overwrite to redo
 For each session: keep every `every_n_frames`-th frame → drop blurry ones
 (Laplacian variance < `blur_threshold`) → drop near-duplicates (dHash within
 `hamming_threshold` bits of a frame already kept in that session) → save to
-`data/dataset/images/<split>/`. It prints a per-session table and writes it to
+`data/dataset/images/<split>/`. Each kept frame gets a row in `manifest.csv`
+with `source=own` (public datasets added later get their dataset name). It prints a per-session table and writes it to
 `reports/frame_extraction_summary.md`. The script refuses to run if labels
 already exist, because re-extracting could orphan them.
 
