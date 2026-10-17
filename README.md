@@ -171,6 +171,19 @@ answer as the contact). `--escalation telegram` needs a local `.env` (see
 `.env.example`). Design and the requirements for a real site (certified fire
 alarm system, DIN 14675): `docs/fire_escalation.md`.
 
+### Fire/smoke model fire_v1 (prepared, not trained)
+A separate model (classes `smoke`, `fire`) on D-Fire (CC0, `SOURCES.md`). The
+authors' test split leaks, so it is re-split by near-copy group
+(`reports/fire_dataset.md`). No images are copied: lists point at
+`data/external/dfire/`.
+```bash
+python scripts/inspect_dfire.py              # counts, leakage, leak-pair sheet
+python scripts/build_fire_dataset.py         # group split -> data/fire/fire_v1.yaml
+python scripts/train_fire.py fire_v1 --dry-run
+python scripts/train_fire.py fire_v1         # GPU, one job at a time (after the battery runs)
+```
+The report gives per-class metrics plus the combined `fire_or_smoke` metric.
+
 ### Smoke test (pipeline check only)
 ```bash
 python scripts/make_smoke_data.py

@@ -28,7 +28,8 @@ import cv2
 import numpy as np
 
 from akkunet.config import load_config
-from akkunet.external import find_split_images, hash_variants, label_path_for, read_boxes, read_class_names
+from akkunet.external import find_split_images, label_path_for, read_boxes, read_class_names
+from akkunet.fire import cached_hash_variants
 from akkunet.sheets import grid, tile
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -42,25 +43,6 @@ def read_list(path: Path) -> list[str]:
 
 def prefix(name: str) -> str:
     return re.match(r"[A-Za-z_]+", name).group()
-
-
-def load_hashes(images: list[Path], cache: Path, rehash: bool) -> np.ndarray:
-    """(N, 4 variants, 4 x uint64) per image, cached by filename order."""
-    names = np.array([p.name for p in images])
-    if cache.exists() and not rehash:
-        data = np.load(cache)
-        if np.array_equal(data["names"], names):
-            return data["hashes"]
-    out = np.empty((len(images), 4, 4), dtype=np.uint64)
-    for i, p in enumerate(images):
-        img = cv2.imread(str(p))
-        if img is None:
-            raise ValueError(f"Could not read image {p}")
-        out[i] = hash_variants(img)
-        if i % 2000 == 0:
-            print(f"  hashed {i}/{len(images)}", flush=True)
-    np.savez(cache, names=names, hashes=out)
-    return out
 
 
 def nearest(query: np.ndarray, ref: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -136,7 +118,7 @@ def main() -> int:
 
     # --- leakage
     all_images = [p for images in splits.values() for p in images]
-    hashes = load_hashes(all_images, root / "hashes.npz", args.rehash)
+    hashes = cached_hash_variants(all_images, root / "hashes.npz", args.rehash)
     index = {p.name: i for i, p in enumerate(all_images)}
     sel = lambda names_: hashes[[index[n] for n in names_]]
 

@@ -17,6 +17,7 @@ paths:
   escalation_db: data/escalation/events.sqlite
   escalation_snapshots: data/escalation/snapshots      # may show people: git-ignored
   hard_negative_candidates: data/escalation/hard_negative_candidates
+  fire: data/fire                 # fire_v1 lists/yaml/manifest (no image copies; images stay in external/dfire)
 
 # Class order matters: the index in this list is the YOLO class ID.
 classes:
@@ -72,6 +73,19 @@ bootstrap:
   seed: 0
   val_fraction: 0.15       # share of every class's images in bootstrap_val
   near_copy_hamming: 10    # dHash bits (of 256) within which two images count as copies
+
+# ---------------------------------------------------------------- Fire/smoke model (separate from batteries)
+fire:
+  dataset: dfire           # folder under paths.external
+  classes: [smoke, fire]   # D-Fire IDs: 0 smoke, 1 fire. Escalation will trigger on EITHER.
+  model: yolo11n.pt
+  imgsz: 640
+  epochs: 40
+  batch: 16
+  patience: 10
+  seed: 0
+  val_fraction: 0.15
+  near_copy_hamming: 10
 
 # ---------------------------------------------------------------- Live demo (Part B3)
 demo:

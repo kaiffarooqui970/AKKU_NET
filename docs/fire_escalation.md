@@ -32,7 +32,7 @@ This is enforced in code, not just in documentation:
 
 ```
 smoke seen in >= trigger_min_frames consecutive frames
-        │  (demo: key "s" toggles SIMULATED smoke; no smoke model yet)
+        │  (demo: key "s" toggles SIMULATED smoke; fire_v1 model planned, not trained yet)
         ▼
 incident opened, snapshot saved, logged ─► alert to PRIMARY contact
         │                                   (snapshot, zone, time,
@@ -53,6 +53,14 @@ incident opened, snapshot saved, logged ─► alert to PRIMARY contact
 - Answers from people who are **not configured contacts** are ignored and logged.
 - A failed message (network down) is logged as `notify_failed`, and the
   escalation continues (timeout, second contact, site alarm).
+
+## Detector (planned)
+
+The trigger is simulated today. Next, the separate fire/smoke model `fire_v1`
+(D-Fire, `reports/fire_dataset.md`) replaces the `s` key: a frame counts if it
+has a `smoke` **or** `fire` box at or above its own confidence, and the
+incident opens after its own number of consecutive frames (both new config
+keys under `escalation:`, separate from the battery alert thresholds).
 
 ## Configuration
 
