@@ -7,6 +7,8 @@ Usage:
     python -m akkunet.app --audio voice                    # spoken German alert (macOS `say`)
 
 Keys in the window: q or Esc quits.
+  s  toggle SIMULATED smoke (no smoke model yet) -> fire escalation workflow
+  c  / f  (console channel only) simulate the contact pressing "Confirm fire" / "False alarm"
 
 Alert rule (config `demo`): a track alerts ONCE, when it has been seen in at
 least `alert_min_frames` frames with confidence >= `alert_conf`. Frames need
@@ -17,6 +19,9 @@ Each alert can also play a sound (config `demo.audio`, or --audio): a system
 sound via afplay, a spoken message via macOS `say`, or nothing. Sounds run as
 background processes so the video never waits for them, with a cooldown so
 several tracks alerting at once give one sound.
+
+Fire/smoke escalation (config `escalation`, docs/fire_escalation.md) is
+human-in-the-loop: the software alerts a person and NEVER calls 112 itself.
 """
 import argparse
 import shutil
@@ -191,6 +196,35 @@ def draw(frame: np.ndarray, detections: list[Detection], names: dict[int, str], 
     return out
 
 
+ESCALATION_COLOURS = {"open": (0, 140, 255), "escalated": (0, 0, 255), "confirmed": (0, 0, 180),
+                      "dismissed": (0, 160, 0)}
+
+
+def escalation_status(manager, now: float) -> tuple[str, tuple] | None:
+    """One status line for the newest incident, e.g. 'waiting for Schichtleitung (42 s)'."""
+    if manager is None or not manager.incidents:
+        return None
+    inc = manager.incidents[max(manager.incidents)]
+    first = manager.contacts["primary"].name
+    if inc.status == "open":
+        left = max(0, manager.timeout - (now - inc.detected_at))
+        text = f"Incident {inc.id}: SMOKE - waiting for {first} ({left:.0f} s until escalation)"
+    elif inc.status == "escalated":
+        text = f"Incident {inc.id}: no answer - escalated to all contacts, SITE ALARM"
+    elif inc.status == "confirmed":
+        text = f"Incident {inc.id}: FIRE CONFIRMED - person calls 112 from own phone, SITE ALARM"
+    else:
+        text = f"Incident {inc.id}: false alarm - snapshot kept as hard-negative candidate"
+    return text, ESCALATION_COLOURS[inc.status]
+
+
+def draw_strip(img: np.ndarray, text: str, colour: tuple, y: int) -> None:
+    """Coloured text strip across the frame at height y (in place)."""
+    h = 28
+    cv2.rectangle(img, (0, y), (img.shape[1], y + h), colour, -1)
+    cv2.putText(img, text, (8, y + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1, cv2.LINE_AA)
+
+
 def parse_source(source):
     """'0' -> webcam 0; anything else is a file path."""
     return int(source) if str(source).isdigit() else str(source)
@@ -217,6 +251,10 @@ def main(argv=None) -> int:
     parser.add_argument("--alert-classes", nargs="*", help="class names that may alert (default: config/all)")
     parser.add_argument("--audio", choices=AUDIO_MODES, help="alert sound (default: config demo.audio.mode)")
     parser.add_argument("--device", help="cpu / mps / cuda (default: config device)")
+    parser.add_argument("--escalation", choices=("console", "telegram", "off"),
+                        help="smoke escalation channel (default: config escalation.channel)")
+    parser.add_argument("--simulate-smoke-from", type=int, metavar="FRAME",
+                        help="switch simulated smoke on at this frame (headless tests)")
     parser.add_argument("--no-window", action="store_true", help="don't open a window (for files/tests)")
     parser.add_argument("--max-frames", type=int, help="stop after this many frames")
     args = parser.parse_args(argv)
@@ -246,6 +284,18 @@ def main(argv=None) -> int:
         print(e)
         return 1
 
+    manager, smoke_trigger, notifier = None, None, None
+    esc_channel = args.escalation or (cfg.get("escalation", {}).get("channel") if
+                                      cfg.get("escalation", {}).get("enabled") else "off")
+    if esc_channel and esc_channel != "off":
+        from akkunet.escalation import build_escalation
+        try:
+            manager, smoke_trigger, notifier = build_escalation(cfg, esc_channel)
+        except ValueError as e:
+            print(f"Escalation: {e}")
+            return 1
+    smoke_on = False
+
     source = parse_source(args.source if args.source is not None else demo["source"])
     cap = cv2.VideoCapture(source)
     if not cap.isOpened():
@@ -259,6 +309,10 @@ def main(argv=None) -> int:
     t_last, fps = time.time(), 0.0
     print(f"Model {weights.name} ({len(names)} classes) on {device}; alert at conf >= {alerts.conf_threshold} "
           f"for >= {alerts.min_frames} frames, audio {audio.mode}. Press q to quit.")
+    if manager:
+        print(f"Escalation via {esc_channel}: press s to simulate smoke"
+              + (", then c = confirm fire / f = false alarm (as the contact)." if esc_channel == "console" else
+                 "; answer on Telegram.") + " This software never calls 112 itself.")
     try:
         while True:
             ok, frame = cap.read()
@@ -274,12 +328,30 @@ def main(argv=None) -> int:
                 print(f"{time.strftime('%H:%M:%S')} ALERT frame {a.frame_index}: {names[a.cls]} "
                       f"track #{a.track_id} conf {a.conf:.2f}", flush=True)
 
+            if manager:
+                if args.simulate_smoke_from is not None and frame_index == args.simulate_smoke_from:
+                    smoke_on = True
+                if smoke_trigger.update(smoke_on):
+                    snap_dir = cfg["paths"]["escalation_snapshots"]
+                    snap_dir.mkdir(parents=True, exist_ok=True)
+                    snap = snap_dir / f"smoke_{time.strftime('%Y%m%d_%H%M%S')}_f{frame_index:06d}.jpg"
+                    cv2.imwrite(str(snap), frame)
+                    inc = manager.trigger(cfg["escalation"]["zone"], "Rauch (SIMULIERT über Demo-Taste s)", snap)
+                    print(f"{time.strftime('%H:%M:%S')} SMOKE incident {inc.id} opened, "
+                          f"alert sent to {manager.contacts['primary'].name}", flush=True)
+                manager.tick()
+
             now = time.time()
             fps = 0.9 * fps + 0.1 / max(now - t_last, 1e-6) if fps else 1 / max(now - t_last, 1e-6)
             t_last = now
             status = f"{fps:4.1f} fps | alert conf>={alerts.conf_threshold} x{alerts.min_frames} frames | " \
                      f"alerts so far: {len(alerts.alerted)}"
             shown = draw(frame, detections, names, alerts.alerted, banner if now < banner_until else None, status)
+            if smoke_on:
+                draw_strip(shown, "SIMULATED SMOKE (key s)", (0, 140, 255), shown.shape[0] - 92)
+            esc_line = escalation_status(manager, now)
+            if esc_line:
+                draw_strip(shown, *esc_line, shown.shape[0] - 62)
 
             if args.record:
                 if writer is None:
@@ -289,13 +361,24 @@ def main(argv=None) -> int:
                 writer.write(shown)
             if not args.no_window:
                 cv2.imshow("AkkuNet demo", shown)
-                if cv2.waitKey(1) & 0xFF in (ord("q"), 27):
+                key = cv2.waitKey(1) & 0xFF
+                if key in (ord("q"), 27):
                     break
+                if manager and key == ord("s"):
+                    smoke_on = not smoke_on
+                    if not smoke_on:
+                        smoke_trigger.reset()   # the next smoke episode can open a new incident
+                if manager and esc_channel == "console" and key in (ord("c"), ord("f")) and manager.incidents:
+                    from akkunet.notify import CONFIRM, DISMISS
+                    notifier.inject(max(manager.incidents), CONFIRM if key == ord("c") else DISMISS,
+                                    manager.contacts["primary"].address)
             frame_index += 1
             if args.max_frames and frame_index >= args.max_frames:
                 break
     finally:
         cap.release()
+        if notifier is not None:
+            notifier.close()
         if writer is not None:
             writer.release()
         if not args.no_window:

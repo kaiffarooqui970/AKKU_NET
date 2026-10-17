@@ -19,6 +19,11 @@ recordings/
 *.sqlite
 *.db
 
+# Secrets: Telegram token and chat IDs
+.env
+.env.*
+!.env.example
+
 # Python
 __pycache__/
 *.egg-info/

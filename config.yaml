@@ -11,6 +11,10 @@ paths:
   external: data/external          # public dataset exports, as downloaded (one folder per dataset)
   class_maps: configs/class_maps   # <dataset>.yaml: source class -> our class / null (drop)
   bootstrap: data/bootstrap        # imported public data for the bootstrap model ONLY
+  env_file: .env                   # local secrets (Telegram token, chat IDs); NEVER committed
+  escalation_db: data/escalation/events.sqlite
+  escalation_snapshots: data/escalation/snapshots      # may show people: git-ignored
+  hard_negative_candidates: data/escalation/hard_negative_candidates
 
 # Class order matters: the index in this list is the YOLO class ID.
 classes:
@@ -99,3 +103,30 @@ demo:
       battery_pack: Akkupack
       tool_battery: Werkzeugakku
       loose_cell: Batterie
+
+# ---------------------------------------------------------------- Fire/smoke escalation
+# HUMAN-IN-THE-LOOP ONLY. The software NEVER calls 112 or any other number. It
+# alerts a responsible person, who confirms or dismisses; on confirmation they get
+# the number and a text to read out and call from their own phone. A real site
+# must use its certified fire alarm system instead (docs/fire_escalation.md).
+escalation:
+  enabled: true
+  channel: console         # console = demo/test default (no network) | telegram (needs .env)
+  # No smoke model yet: in the demo window, key "s" toggles SIMULATED smoke.
+  trigger_min_frames: 15   # consecutive frames with smoke before an incident opens
+  response_timeout_seconds: 90   # then: secondary contact + site alarm
+  zone: "Kipphalle, Bereich 1 (DEMO)"
+  facility:                # DEMO values: replace for a real pilot
+    name: "AkkuNet Demo-Anlage"
+    address: "Musterstraße 1, 12345 Musterstadt"
+    emergency_number: "112"
+  contacts:                # Telegram chat IDs come from .env, never from this file
+    primary:
+      name: Schichtleitung
+      telegram_chat_id_env: TELEGRAM_CHAT_ID_PRIMARY
+    secondary:
+      name: Betriebsleitung
+      telegram_chat_id_env: TELEGRAM_CHAT_ID_SECONDARY
+  site_alarm:
+    sound: /System/Library/Sounds/Funk.aiff
+    repeats: 10            # demo: plays the sound 10x at full volume

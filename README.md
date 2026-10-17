@@ -55,7 +55,9 @@ scripts/               command-line entry points
 notebooks/             Colab training notebook (Stage 3)
 tests/                 pytest
 reports/               generated markdown reports
-docs/                  guides: labelling_guide.md (classes, decisions), robustness_checks.md (planned tests)
+docs/                  guides: labelling_guide.md, robustness_checks.md, fire_escalation.md
+data/escalation/       escalation event log, snapshots, hard-negative candidates (git-ignored)
+.env                   local secrets (Telegram); never committed, template .env.example
 ```
 
 ## Run order so far
@@ -156,6 +158,18 @@ or Esc to quit.
 `demo.audio.cooldown_seconds` (5 s). Without afplay/say (not macOS) it warns
 once and rings the terminal bell. On macOS the terminal needs camera permission (System Settings ›
 Privacy & Security › Camera).
+
+### Fire/smoke escalation (human-in-the-loop)
+**The software never calls 112 or any number.** In the demo window, `s` toggles
+SIMULATED smoke. After `escalation.trigger_min_frames` frames, the primary
+contact gets an alert with snapshot and buttons "Confirm fire" / "False alarm".
+Confirm → they receive 112, the address and a text to read out, and the site
+alarm sounds. No answer within 90 s → second contact + site alarm. False alarm
+→ snapshot saved as a hard-negative candidate. Everything is logged to
+`data/escalation/events.sqlite`. The default channel is `console` (demo, keys `c`/`f`
+answer as the contact). `--escalation telegram` needs a local `.env` (see
+`.env.example`). Design and the requirements for a real site (certified fire
+alarm system, DIN 14675): `docs/fire_escalation.md`.
 
 ### Smoke test (pipeline check only)
 ```bash
