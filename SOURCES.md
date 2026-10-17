@@ -56,6 +56,27 @@ Image counts are the project totals on each page; the downloaded version can
 differ. Preprocessing, augmentation, leakage and other findings for each download are
 recorded in `reports/external/<folder>_inspection.md`.
 
+## Fire / smoke model (separate model, inspection stage)
+
+| folder (`data/external/…`) | dataset | author | licence | images | classes | notes |
+|---|---|---|---|---:|---|---|
+| `dfire` | D-Fire | GAIA (Venâncio, Lisboa, Barbosa), [github.com/gaiasd/DFireDataset](https://github.com/gaiasd/DFireDataset); official OneDrive downloads: images + labels in `train/` and `test/`, plus the authors' split lists (`splits/`: train/test lists, 5-fold train/valid lists, test video names; the videos themselves are not downloaded) | **CC0 1.0** for the collection | 21,527 (1,164 fire only, 5,867 smoke only, 4,658 both, 9,838 neither) | 0 smoke, 1 fire (YOLO; no data.yaml shipped, we wrote one) | see below |
+
+**D-Fire licence note, in the authors' words:** *"The present dataset
+available, D-fire, is a collection of images in the public domain which we do
+not have copyrights over. However, the image collection is the result of our
+work and will be made available to the public domain under the Creative
+Commons Zero v1.0 Universal license."* So CC0 covers the authors' compilation
+and annotations. The authors don't hold the image copyrights and state that
+the images are public domain, which we can't verify image by image. Please cite:
+Venâncio, Lisboa, Barbosa, "An automatic fire detection system based on deep
+convolutional neural networks for low-power, resource-constrained devices",
+Neural Computing and Applications, 2022.
+
+Not used (B2 fire research, 2026-10-17): FASDD (licence unclear: CC BY-SA 4.0 on
+Science Data Bank vs CC BY 4.0 on mirrors; share-alike risk), Pyronear
+pyro-sdis (Apache-2.0, but distant wildfire smoke), DFS (no licence).
+
 ## Pretrained weights
 
 - `yolo11n.pt` (Ultralytics, trained on COCO), AGPL-3.0, see README licence note.
