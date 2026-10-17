@@ -82,3 +82,20 @@ demo:
   alert_min_frames: 5
   alert_classes: []        # empty = every class of the model
   banner_seconds: 3.0      # how long the red banner stays after an alert
+  # Sound when an alert fires (same rule as the red banner). Played in the
+  # background, so the video never freezes. Override with --audio.
+  audio:
+    mode: beep             # beep (afplay a sound file) | voice (macOS `say`) | off
+    cooldown_seconds: 5.0  # at most one sound per this many seconds, even if several tracks alert
+    beep_sound: /System/Library/Sounds/Sosumi.aiff
+    voice: Anna            # `say -v '?'` lists the installed voices
+    voice_text: "Achtung: möglicher Akku erkannt"
+    # If true, say voice_text_with_class instead, with {name} = the class's spoken name.
+    say_class_name: false
+    voice_text_with_class: "Achtung: {name} erkannt"
+    spoken_class_names:
+      vape: E-Zigarette
+      power_bank: Powerbank
+      battery_pack: Akkupack
+      tool_battery: Werkzeugakku
+      loose_cell: Batterie

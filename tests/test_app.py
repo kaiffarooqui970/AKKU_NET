@@ -2,7 +2,7 @@
 import numpy as np
 import pytest
 
-from akkunet.app import BANNER_TEXT, AlertTracker, Detection, draw, parse_source, resolve_classes
+from akkunet.app import BANNER_TEXT, AlertTracker, AudioAlerter, Detection, draw, parse_source, resolve_classes
 
 
 def det(track_id, conf=0.9, cls=0):
@@ -51,3 +51,83 @@ def test_parse_source_and_resolve_classes():
     assert resolve_classes(names, ["loose_cell"]) == {4}
     with pytest.raises(ValueError, match="Unknown"):
         resolve_classes(names, ["battery"])
+
+
+# ---------------------------------------------------------------- audio (no real sound)
+
+class FakeClock:
+    def __init__(self):
+        self.t = 100.0
+
+    def __call__(self):
+        return self.t
+
+
+class FakeProcess:
+    def poll(self):
+        return 0
+
+
+def make_audio(mode="beep", which=lambda name: f"/usr/bin/{name}", **kw):
+    clock, spawned = FakeClock(), []
+    audio = AudioAlerter(mode=mode, cooldown=5.0, clock=clock, which=which,
+                         spawn=lambda cmd: spawned.append(cmd) or FakeProcess(), **kw)
+    return audio, clock, spawned
+
+
+def test_cooldown_allows_one_sound_per_window():
+    audio, clock, spawned = make_audio()
+    assert audio.alert("loose_cell") is True
+    assert audio.alert("vape") is False            # same moment: several tracks alert -> one sound
+    clock.t += 4.9
+    assert audio.alert("vape") is False            # still inside the cooldown
+    clock.t += 0.1
+    assert audio.alert("vape") is True             # exactly 5 s later
+    assert len(spawned) == 2
+
+
+def test_suppressed_alert_does_not_extend_cooldown():
+    audio, clock, spawned = make_audio()
+    audio.alert("x")
+    clock.t += 3
+    audio.alert("x")                               # suppressed
+    clock.t += 2                                   # 5 s after the FIRST sound
+    assert audio.alert("x") is True
+
+
+def test_off_mode_never_plays():
+    audio, _, spawned = make_audio(mode="off")
+    assert audio.alert("vape") is False and spawned == []
+
+
+def test_commands_for_beep_and_voice():
+    beep, _, spawned = make_audio(beep_sound="/x/Sosumi.aiff")
+    beep.alert("vape")
+    assert spawned == [["afplay", "/x/Sosumi.aiff"]]
+
+    voice, _, spawned = make_audio(mode="voice")
+    voice.alert("vape")
+    assert spawned == [["say", "-v", "Anna", "Achtung: möglicher Akku erkannt"]]
+
+    named, _, spawned = make_audio(mode="voice", say_class_name=True, spoken_class_names={"vape": "E-Zigarette"})
+    named.alert("vape")
+    assert spawned[0][-1] == "Achtung: E-Zigarette erkannt"
+
+
+def test_missing_program_falls_back_to_bell_and_warns_once(capsys):
+    audio, clock, spawned = make_audio(which=lambda name: None)
+    assert audio.alert("vape") is True
+    clock.t += 10
+    audio.alert("vape")
+    out = capsys.readouterr()
+    assert spawned == [] and out.out == "\a\a"
+    assert out.err.count("WARNING") == 1
+
+
+def test_from_config_and_cli_override():
+    cfg = {"mode": "voice", "cooldown_seconds": 2, "voice": "Eddy"}
+    assert AudioAlerter.from_config(cfg).voice == "Eddy"
+    assert AudioAlerter.from_config(cfg, "off").mode == "off"
+    assert AudioAlerter.from_config(None).mode == "beep"
+    with pytest.raises(ValueError, match="audio mode"):
+        AudioAlerter(mode="loud")

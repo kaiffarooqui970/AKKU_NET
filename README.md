@@ -147,7 +147,14 @@ python -m akkunet.app --weights yolo11n.pt --alert-classes person   # check with
 Each box shows `#track class confidence`. A track raises **one** alert (red box,
 red banner "Possible battery detected", console line) after it has been seen
 in `demo.alert_min_frames` frames with confidence ≥ `demo.alert_conf`. Press q
-or Esc to quit. On macOS the terminal needs camera permission (System Settings ›
+or Esc to quit.
+
+**Sound:** `--audio beep` (default: macOS system sound via `afplay`), `--audio voice`
+(German via `say`, voice "Anna": "Achtung: möglicher Akku erkannt"; set
+`demo.audio.say_class_name: true` for e.g. "Achtung: E-Zigarette erkannt") or
+`--audio off`. Sounds play in the background and at most once per
+`demo.audio.cooldown_seconds` (5 s). Without afplay/say (not macOS) it warns
+once and rings the terminal bell. On macOS the terminal needs camera permission (System Settings ›
 Privacy & Security › Camera).
 
 ### Smoke test (pipeline check only)

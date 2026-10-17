@@ -4,6 +4,7 @@ Usage:
     python -m akkunet.app                                  # webcam 0, weights from config.yaml
     python -m akkunet.app --source clip.mp4 --record out.mp4
     python -m akkunet.app --weights yolo11n.pt --alert-classes person   # check with a stock COCO model
+    python -m akkunet.app --audio voice                    # spoken German alert (macOS `say`)
 
 Keys in the window: q or Esc quits.
 
@@ -11,8 +12,15 @@ Alert rule (config `demo`): a track alerts ONCE, when it has been seen in at
 least `alert_min_frames` frames with confidence >= `alert_conf`. Frames need
 not be consecutive: ByteTrack keeps the ID through short gaps, and a brief
 dip in confidence shouldn't reset the count.
+
+Each alert can also play a sound (config `demo.audio`, or --audio): a system
+sound via afplay, a spoken message via macOS `say`, or nothing. Sounds run as
+background processes so the video never waits for them, with a cooldown so
+several tracks alerting at once give one sound.
 """
 import argparse
+import shutil
+import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
@@ -68,6 +76,86 @@ class AlertTracker:
                 self.alerted.add(d.track_id)
                 new.append(Alert(d.track_id, d.cls, d.conf, frame_index))
         return new
+
+
+AUDIO_MODES = ("beep", "voice", "off")
+
+
+@dataclass
+class AudioAlerter:
+    """Plays at most one sound per `cooldown` seconds, without blocking the caller.
+
+    `clock`, `which` and `spawn` are injectable so tests run without real sound.
+    If the needed program (afplay / say) is missing, e.g. not on macOS, it prints
+    one warning and rings the terminal bell instead.
+    """
+    mode: str = "beep"
+    cooldown: float = 5.0
+    beep_sound: str = "/System/Library/Sounds/Sosumi.aiff"
+    voice: str = "Anna"
+    voice_text: str = "Achtung: möglicher Akku erkannt"
+    say_class_name: bool = False
+    voice_text_with_class: str = "Achtung: {name} erkannt"
+    spoken_class_names: dict = field(default_factory=dict)
+    clock: callable = time.monotonic
+    which: callable = shutil.which
+    spawn: callable = None
+    last_played: float | None = None
+    warned: bool = False
+    processes: list = field(default_factory=list)
+
+    def __post_init__(self):
+        if self.mode not in AUDIO_MODES:
+            raise ValueError(f"audio mode must be one of {AUDIO_MODES}, not {self.mode!r}")
+        if self.spawn is None:
+            self.spawn = lambda cmd: subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    @classmethod
+    def from_config(cls, audio_cfg: dict, mode: str | None = None) -> "AudioAlerter":
+        audio_cfg = audio_cfg or {}
+        return cls(mode=mode or audio_cfg.get("mode", "beep"),
+                   cooldown=audio_cfg.get("cooldown_seconds", 5.0),
+                   beep_sound=audio_cfg.get("beep_sound", cls.beep_sound),
+                   voice=audio_cfg.get("voice", cls.voice),
+                   voice_text=audio_cfg.get("voice_text", cls.voice_text),
+                   say_class_name=audio_cfg.get("say_class_name", False),
+                   voice_text_with_class=audio_cfg.get("voice_text_with_class", cls.voice_text_with_class),
+                   spoken_class_names=audio_cfg.get("spoken_class_names") or {})
+
+    def command(self, class_name: str) -> list[str]:
+        if self.mode == "beep":
+            return ["afplay", self.beep_sound]
+        text = self.voice_text
+        if self.say_class_name:
+            text = self.voice_text_with_class.format(name=self.spoken_class_names.get(class_name, class_name))
+        return ["say", "-v", self.voice, text]
+
+    def alert(self, class_name: str) -> bool:
+        """Play the alert sound unless off or inside the cooldown. Returns True if a sound started."""
+        if self.mode == "off":
+            return False
+        now = self.clock()
+        if self.last_played is not None and now - self.last_played < self.cooldown:
+            return False
+        self.last_played = now
+        self.processes = [p for p in self.processes if p.poll() is None]  # reap finished sounds
+
+        cmd = self.command(class_name)
+        if self.which(cmd[0]) is None:
+            if not self.warned:
+                print(f"WARNING: '{cmd[0]}' not found (not macOS?); using the terminal bell for alerts.",
+                      file=sys.stderr)
+                self.warned = True
+            print("\a", end="", flush=True)
+            return True
+        try:
+            self.processes.append(self.spawn(cmd))
+        except OSError as e:
+            if not self.warned:
+                print(f"WARNING: could not play alert sound ({e}); using the terminal bell.", file=sys.stderr)
+                self.warned = True
+            print("\a", end="", flush=True)
+        return True
 
 
 def detections_from_result(result) -> list[Detection]:
@@ -127,6 +215,7 @@ def main(argv=None) -> int:
     parser.add_argument("--alert-conf", type=float)
     parser.add_argument("--alert-min-frames", type=int)
     parser.add_argument("--alert-classes", nargs="*", help="class names that may alert (default: config/all)")
+    parser.add_argument("--audio", choices=AUDIO_MODES, help="alert sound (default: config demo.audio.mode)")
     parser.add_argument("--device", help="cpu / mps / cuda (default: config device)")
     parser.add_argument("--no-window", action="store_true", help="don't open a window (for files/tests)")
     parser.add_argument("--max-frames", type=int, help="stop after this many frames")
@@ -151,6 +240,11 @@ def main(argv=None) -> int:
     alerts = AlertTracker(args.alert_conf if args.alert_conf is not None else demo["alert_conf"],
                           args.alert_min_frames or demo["alert_min_frames"], alert_classes)
     device = get_device(args.device or cfg["device"])
+    try:
+        audio = AudioAlerter.from_config(demo.get("audio"), args.audio)
+    except ValueError as e:
+        print(e)
+        return 1
 
     source = parse_source(args.source if args.source is not None else demo["source"])
     cap = cv2.VideoCapture(source)
@@ -164,7 +258,7 @@ def main(argv=None) -> int:
     frame_index, banner_until, banner = 0, 0.0, None
     t_last, fps = time.time(), 0.0
     print(f"Model {weights.name} ({len(names)} classes) on {device}; alert at conf >= {alerts.conf_threshold} "
-          f"for >= {alerts.min_frames} frames. Press q to quit.")
+          f"for >= {alerts.min_frames} frames, audio {audio.mode}. Press q to quit.")
     try:
         while True:
             ok, frame = cap.read()
@@ -174,6 +268,7 @@ def main(argv=None) -> int:
                                  imgsz=demo["imgsz"], device=device, verbose=False)[0]
             detections = detections_from_result(result)
             for a in alerts.update(detections, frame_index):
+                audio.alert(names[a.cls])  # cooldown: several alerts in one frame -> one sound
                 banner = f"{BANNER_TEXT}: {names[a.cls]} #{a.track_id}"
                 banner_until = time.time() + demo["banner_seconds"]
                 print(f"{time.strftime('%H:%M:%S')} ALERT frame {a.frame_index}: {names[a.cls]} "
