@@ -171,6 +171,18 @@ answer as the contact). `--escalation telegram` needs a local `.env` (see
 `.env.example`). Design and the requirements for a real site (certified fire
 alarm system, DIN 14675): `docs/fire_escalation.md`.
 
+### bootstrap_v2 on Kaggle (free GPU)
+Same recipe as bootstrap_v1, plus 3,000 public COCO "no battery" images
+(licence-filtered, empty labels, train only). A held-out 500-image false-alarm
+test compares v1 and v2.
+```bash
+python scripts/build_kaggle_package.py      # -> data/kaggle/akkunet_bootstrap_v2.zip + bootstrap_v2.ipynb
+```
+Upload the zip as a **private** Kaggle dataset. Import the notebook, set GPU and
+Internet on, add the dataset, then Run all. Download `bootstrap_v2_results.zip`
+and unzip it into `runs/bootstrap/`. `--include-own-negatives` adds your own
+negative frames, which show a person: private datasets only.
+
 ### Fire/smoke model fire_v1 (prepared, not trained)
 A separate model (classes `smoke`, `fire`) on D-Fire (CC0, `SOURCES.md`). The
 authors' test split leaks, so it is re-split by near-copy group

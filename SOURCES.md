@@ -56,6 +56,17 @@ Image counts are the project totals on each page; the downloaded version can
 differ. Preprocessing, augmentation, leakage and other findings for each download are
 recorded in `reports/external/<folder>_inspection.md`.
 
+## Public "no battery" images (bootstrap_v2 negatives, TRAIN only)
+
+| source | licence | use |
+|---|---|---|
+| COCO 2017 train ([cocodataset.org](https://cocodataset.org)), downloaded on Kaggle by `kaggle/bootstrap_v2.py` | Annotations CC BY 4.0. Images are Flickr photos with **per-image** licences; we use only images marked *Attribution License* (CC BY 2.0), *No known copyright restrictions* or *United States Government Work*. Non-commercial, share-alike and no-derivatives images are excluded. | 3,000 images with empty labels added to train, plus 500 other ones as a false-alarm test (never trained on) |
+
+COCO categories are not used as labels: the images only teach "no battery
+here". Each run writes `coco_negatives_attribution.csv` (file, licence, Flickr
+URL), which is kept with the run's results for attribution. COCO has no battery
+category, so a few images may show an unlabelled battery (small label noise).
+
 ## Fire / smoke model (separate model, inspection stage)
 
 | folder (`data/external/…`) | dataset | author | licence | images | classes | notes |
