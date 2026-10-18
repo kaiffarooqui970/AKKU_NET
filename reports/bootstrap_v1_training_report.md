@@ -72,6 +72,19 @@ predicted class.
   - A Tic Tac box was detected as a vape.
   - A wardrobe in the background was detected.
   - The user saw no clear improvement over epoch 4.
+- **Final weights, recorded test (2026-10-18, 55 s, screen recording kept
+  local because it shows the user):** 4 alerts, all false:
+
+  | time | object | alerted as |
+  |---|---|---|
+  | 16.7 s | Tic Tac | vape |
+  | 25.3 s | smartphone (lock screen) | vape |
+  | 31.5 s | white wardrobe in the background | battery_pack |
+  | 51.1 s | Tic Tac held in front of the face | vape |
+
+  - The wardrobe was also boxed below the alert threshold at 0 s, 29 s and 36 s.
+  - **Faces alone: 0 alerts,** compared with 7 at epoch 4. That's an improvement.
+  - No real battery was shown, so recall wasn't tested.
 - **Reason:** the training data has almost no "this is not a battery"
   examples from a real room, so an internet-photo mAP of 0.93 doesn't carry
   over. The next step, bootstrap_v2, adds the 308 own hard-negative frames
